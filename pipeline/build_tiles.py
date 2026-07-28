@@ -57,7 +57,14 @@ Three of those columns are worth explaining:
   column entirely: it measures at 0.1 bytes per item.
 * `admin` indexes a string table private to the tile. There are 293,833
   distinct admin areas, far too many for a global table, but only a handful in
-  any one tile.
+  any one tile. For an item placed at a *borrowed* coordinate it holds the
+  borrowed place's name instead - "Ulm" rather than "Baden-Württemberg" -
+  because that is the word the tooltip needs and it costs no new column.
+* `flags` bit 0 means an article exists, bit 1 an image, bit 2 a website, and
+  bits 3-5 say why the item is at this coordinate at all: 0 its own P625,
+  1 born here, 2 died here, 3 located here, 4 headquartered here, 5 set here,
+  6 home port, 7 otherwise associated. Everything above 0 means the coordinate
+  belongs to something else and the client must say so.
 
 Sentinels rather than a null mask, because they compress to nothing:
 population 0xFFFFFFFF, country/admin 0xFFFF, elevation/year -32768.
@@ -84,7 +91,7 @@ import polars as pl
 
 from pipeline import config
 from pipeline.packfile import DEFAULT_PART_BYTES, PackWriter, remove_parts
-from pipeline.taxonomy import CATEGORIES, PALETTE, subcategory_names
+from pipeline.taxonomy import CATEGORIES, CATEGORY_ID, PALETTE, subcategory_names
 
 MAGIC = b"WMT2"
 VERSION = 2
@@ -92,10 +99,24 @@ HEADER_BYTES = 48
 FLAG_HAS_WIKI = 1
 FLAG_HAS_IMAGE = 2
 FLAG_HAS_WEBSITE = 4
+# Bits 3-5 hold *why* this item is at this coordinate: 0 its own P625, 1 born
+# here, 2 died here, and so on - see config.LOC_SOURCE. Three bits, seven
+# meanings, and bits 6-7 are still free.
+FLAG_LOC_SHIFT = 3
+FLAG_LOC_MASK = 0b111
 
 NO_POP = 0xFFFFFFFF
 NO_REF = 0xFFFF          # country and admin
 NO_INT16 = -32768        # elevation and year
+
+PEOPLE_CAT = CATEGORY_ID["People"]
+
+# Phyllotaxis: consecutive points a golden angle apart, at radius proportional
+# to sqrt(index), which is how a sunflower packs seeds evenly into a disc.
+GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
+JITTER_MIN_KM = 0.2
+JITTER_MAX_KM = 8.0
+KM_PER_DEGREE = 111.32
 
 print = functools.partial(print, flush=True)
 
@@ -112,8 +133,77 @@ def tile_xy(lon: np.ndarray, lat: np.ndarray, z: int) -> tuple[np.ndarray, np.nd
     return np.clip(x, 0, n - 1), np.clip(y, 0, n - 1)
 
 
+def spread_derived(df: pl.DataFrame) -> pl.DataFrame:
+    """Fan items placed at the same borrowed coordinate out around it.
+
+    Everyone born in Paris resolves to one point. Left alone that is a single
+    dot with fifty thousand things behind it: the collision pass can only ever
+    show one of them, and the other 49,999 are invisible and unhoverable.
+
+    So the k-th item at a place (in score order) is moved to radius
+    R*sqrt(k/K) at k golden angles round the circle - even coverage of the
+    disc, no random number generator, and the same answer on every rebuild.
+    The most important one stays exactly on the place. R comes from the
+    place's population, because a village should not scatter its people across
+    a county.
+
+    This invents a coordinate, which is why the location-source flag and the
+    "born in Ulm" wording in the tooltip are not optional: the map must never
+    imply the person is standing there.
+
+    build_tiles and build_search both call this, on the whole table and before
+    either of them filters anything, because they have to agree to the metre:
+    if the search index kept the real coordinate, clicking "Albert Einstein"
+    would fly to the middle of Ulm and his dot would be somewhere off-screen.
+    That is also why the sort lives in here and why it breaks ties on qid - a
+    plain sort on score alone is not a total order, and two callers could
+    number a tied group differently.
+    """
+    df = df.sort(["score", "qid"], descending=[True, False])
+    derived = pl.col("loc_pid") != 0
+    df = df.with_columns(
+        pl.int_range(pl.len()).over("loc_qid").alias("_k"),
+        pl.len().over("loc_qid").alias("_kn"),
+    )
+    # Radius from the place's population where there is one, otherwise from
+    # how many items landed there, which is a decent proxy for the same thing.
+    radius_km = (
+        pl.when(pl.col("loc_pop").is_not_null())
+        .then(1.2 * (1 + pl.col("loc_pop")).log10() - 3.0)
+        .otherwise(0.3 * pl.col("_kn").sqrt())
+        .clip(JITTER_MIN_KM, JITTER_MAX_KM)
+    )
+    r = radius_km * (pl.col("_k") / pl.col("_kn")).sqrt()
+    theta = pl.col("_k") * GOLDEN_ANGLE
+    # Longitude degrees shrink with latitude; the clamp keeps a birthplace in
+    # Svalbard from being flung across the Arctic.
+    cos_lat = (pl.col("lat") * math.pi / 180).cos().clip(0.05, 1.0)
+    moved = derived & (pl.col("_kn") > 1) & (pl.col("_k") > 0)
+    out = df.with_columns(
+        pl.when(moved)
+        .then(pl.col("lon") + r * theta.cos() / (KM_PER_DEGREE * cos_lat))
+        .otherwise(pl.col("lon"))
+        .alias("lon"),
+        pl.when(moved)
+        .then(pl.col("lat") + r * theta.sin() / KM_PER_DEGREE)
+        .otherwise(pl.col("lat"))
+        .alias("lat"),
+    ).with_columns(
+        pl.col("lon").clip(-180.0, 180.0),
+        pl.col("lat").clip(-85.05, 85.05),
+    )
+    n_moved = out.select(moved.sum()).item()
+    places = out.filter(derived).select(pl.col("loc_qid").n_unique()).item()
+    print(f"  spread {n_moved:,} derived items around {places:,} places")
+    return out.drop("_k", "_kn")
+
+
 def assign_zoom(
-    df: pl.DataFrame, max_zoom: int, capacity: int, cat_quota: int
+    df: pl.DataFrame,
+    max_zoom: int,
+    capacity: int,
+    cat_quota: int,
+    deep_capacity: int,
 ) -> pl.DataFrame:
     """Give every row the shallowest zoom whose tile still has room.
 
@@ -142,9 +232,45 @@ def assign_zoom(
             pl.int_range(pl.len()).over(["tx", "ty", "cat"]).alias("cat_slot"),
         )
         if z == max_zoom:
-            # Deepest level takes whatever is left, so nothing is dropped.
-            fits = remaining
-            rest = remaining.clear()
+            # The deepest level used to take everything left over, which was
+            # fine while every item had its own coordinate. It is not fine once
+            # two million people are stacked on a few thousand cities: one z12
+            # tile over central Paris wants 22,559 items and would encode to
+            # 850 KiB for a single viewport. So the last level gets a budget
+            # too - but the budget falls on the *borrowed* coordinates only.
+            #
+            # An item with a real P625 is never dropped. It is genuinely there,
+            # it was on the map before People existed, and evicting a quarter
+            # of a million real places to make room for synthetic points would
+            # be a straight regression. People are what caused the crowding, so
+            # people are what yields: each tile keeps its own-coordinate items
+            # in full and fills whatever budget is left with the highest-scoring
+            # derived ones.
+            remaining = remaining.with_columns(
+                (~pl.col("derived")).sum().over(["tx", "ty"]).alias("own_here"),
+                pl.int_range(pl.len())
+                .over(["tx", "ty", "derived"])
+                .alias("derived_slot"),
+            )
+            keep = (~pl.col("derived")) | (
+                pl.col("own_here") + pl.col("derived_slot") < deep_capacity
+            )
+            fits = remaining.filter(keep).drop("own_here", "derived_slot")
+            rest = remaining.filter(~keep)
+            if len(rest):
+                worst = (
+                    remaining.group_by("tx", "ty")
+                    .len()
+                    .sort("len", descending=True)
+                    .head(1)
+                )
+                print(
+                    f"  z={z:2d}  dropped {len(rest):,} borrowed-coordinate items "
+                    f"over the {deep_capacity:,}-per-tile budget "
+                    f"(fullest tile wanted {worst['len'][0]:,}); "
+                    f"every item with a real coordinate was kept"
+                )
+            rest = rest.clear()  # nowhere deeper to push them
         else:
             keep = (pl.col("slot") < capacity) | (pl.col("cat_slot") < cat_quota)
             fits = remaining.filter(keep)
@@ -302,6 +428,19 @@ def main() -> None:
     ap.add_argument("--max-zoom", type=int, default=12)
     ap.add_argument("--capacity", type=int, default=200)
     ap.add_argument("--cat-quota", type=int, default=8)
+    ap.add_argument(
+        "--deep-capacity",
+        type=int,
+        default=8000,
+        help=(
+            "per-tile budget at the deepest zoom, where there is nowhere left "
+            "to push an item. Only borrowed-coordinate items are ever dropped "
+            "by it; overflow is reported. 8000 keeps the worst tile at 358 KiB "
+            "against a 326 KiB floor set by real places alone, and drops 3.8%% "
+            "of the derived items. Doubling it to 16000 saves 80k more people "
+            "but takes the worst tile to 673 KiB."
+        ),
+    )
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument(
         "--part-bytes",
@@ -320,8 +459,9 @@ def main() -> None:
             "cat", "sub", "label_en", "title_en", "native_label",
             "title_native", "native_site", "title_any", "any_site",
             "image", "website", "descr_en", "population", "elevation",
-            "inception", "n_sitelinks", "country_label", "admin_label",
+            "inception", "birth", "n_sitelinks", "country_label", "admin_label",
             "n_countries", "n_admin",
+            "loc_pid", "loc_qid", "loc_label", "loc_pop",
         ],
     )
     # "Where is it" only has an answer when there is one. A river through ten
@@ -334,6 +474,10 @@ def main() -> None:
         .alias("admin_label"),
     )
     print(f"  {len(master):,} items")
+
+    # Before the unnamed rows are dropped, so build_search - which drops a
+    # different set - lands on exactly the same coordinates.
+    master = spread_derived(master)
 
     # A tile is a list of labels; an item with no name anywhere would draw as
     # "Q12345", which is noise. Those rows stay in articles.parquet.
@@ -387,8 +531,12 @@ def main() -> None:
         .fill_null(NO_INT16)
         .cast(pl.Int16)
         .alias("elev"),
-        # "1784-05-12T00:00:00Z", and "-0500-..." for BC.
-        pl.col("inception")
+        # "1784-05-12T00:00:00Z", and "-0500-..." for BC. For a person the
+        # interesting year is when they were born, not when anything was
+        # founded; the client keys off the category to label it correctly.
+        pl.when(pl.col("cat") == PEOPLE_CAT)
+        .then(pl.col("birth"))
+        .otherwise(pl.col("inception"))
         .str.extract(r"^(-?\d+)", 1)
         .cast(pl.Int32, strict=False)
         .clip(NO_INT16 + 1, 32767)
@@ -397,7 +545,15 @@ def main() -> None:
         .alias("year"),
         pl.col("n_sitelinks").fill_null(0).clip(0, 255).cast(pl.UInt8).alias("sitelinks"),
         pl.col("country_id").fill_null(NO_REF).cast(pl.UInt16).alias("country"),
-        pl.col("admin_label").fill_null("").alias("admin"),
+        # For a derived row the admin slot carries the *place it was placed
+        # at* - "Ulm", not "Baden-Württemberg". That is the word the tooltip
+        # needs, it repeats hard within a tile so the per-tile string table
+        # squashes it, and it costs no new column.
+        pl.coalesce(pl.col("loc_label"), pl.col("admin_label"))
+        .fill_null("")
+        .alias("admin"),
+        pl.col("loc_pid"),
+        (pl.col("loc_pid") != 0).alias("derived"),
         pl.col("descr_en").fill_null("").alias("descr"),
         # Drawn label: English label, else the English article title, else the
         # name the place uses itself, else whatever article exists.
@@ -436,8 +592,14 @@ def main() -> None:
             pl.when(pl.col("article").is_not_null()).then(FLAG_HAS_WIKI).otherwise(0)
             + pl.when(pl.col("image").is_not_null()).then(FLAG_HAS_IMAGE).otherwise(0)
             + pl.when(pl.col("website").is_not_null()).then(FLAG_HAS_WEBSITE).otherwise(0)
+            # Why this item is at this coordinate, in bits 3-5. Multiplication
+            # rather than a shift because polars expressions have no <<.
+            + pl.col("loc_pid")
+            .replace_strict(config.LOC_SOURCE, default=0, return_dtype=pl.UInt8)
+            .cast(pl.Int32)
+            * (1 << FLAG_LOC_SHIFT)
         ).cast(pl.UInt8).alias("flags"),
-    ).drop("title_en", "article", "article_site", "image", "website")
+    ).drop("title_en", "article", "article_site", "image", "website", "loc_pid")
 
     del master
 
@@ -446,10 +608,11 @@ def main() -> None:
     # table once per zoom, and dragging 1 GB of descriptions through thirteen
     # rounds of that costs far more than the join back.
     placement = assign_zoom(
-        df.select("qid", "lon", "lat", "score", "cat"),
+        df.select("qid", "lon", "lat", "score", "cat", "derived"),
         args.max_zoom,
         args.capacity,
         args.cat_quota,
+        args.deep_capacity,
     ).select("qid", "z", "tx", "ty")
     df = df.with_columns(
         (pl.col("score") * 65535).clip(0, 65535).cast(pl.UInt16).alias("score_u16")
@@ -518,6 +681,9 @@ def main() -> None:
             for i, name in enumerate(CATEGORIES)
         ],
         "palette": PALETTE,
+        # flag-bits code -> how the tooltip should introduce the place.
+        "locSources": [config.LOC_PHRASE[i] for i in range(8)],
+        "peopleCat": PEOPLE_CAT,
     }
     (config.DATA_DIR / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"

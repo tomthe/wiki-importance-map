@@ -16,10 +16,10 @@ import sys
 import time
 
 STAGES = [
-    ("truthy", "pipeline.extract_truthy", "extract the Wikidata truthy dump (~45 min)"),
+    ("truthy", "pipeline.extract_truthy", "extract the Wikidata truthy dump (~60 min)"),
     ("ranks", "pipeline.extract_ranks", "danker PageRank + QRank (~1 min)"),
     ("sitelinks", "pipeline.extract_sitelinks", "Wikipedia titles per item (~5 min)"),
-    ("master", "pipeline.build_master", "join into articles.parquet"),
+    ("master", "pipeline.build_master", "join into articles.parquet, incl. derived locations"),
     ("tiles", "pipeline.build_tiles", "binary tile pyramid"),
     ("search", "pipeline.build_search", "prefix search index"),
 ]

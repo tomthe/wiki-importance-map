@@ -13,9 +13,11 @@ of parsers:
 Each worker writes its own parquet shards, so nothing is merged in memory:
 
   coords_NN.parquet       qid, lon, lat            (P625, Earth only)
-  claims_item_NN.parquet  qid, pid, value          (P31 P279 P17 P131 P37)
+  claims_item_NN.parquet  qid, pid, value          (P31 P279 P17 P131 P37,
+                                                    P19 P20 P106 P159 P276
+                                                    P504 P532 P551 P840 P937)
   claims_num_NN.parquet   qid, pid, value          (P1082 P2044)
-  claims_time_NN.parquet  qid, pid, value          (P571)
+  claims_time_NN.parquet  qid, pid, value          (P571 P569 P570)
   claims_iri_NN.parquet   qid, pid, value          (P18 P856)
   claims_mono_NN.parquet  qid, pid, value, lang    (P1705 P1448)
   claims_str_NN.parquet   qid, pid, value          (P424)
@@ -60,11 +62,18 @@ SUBJECT_PREFIX_LEN = len(SUBJECT_PREFIX)
 QUOTED = rb'[^"\\]*(?:\\.[^"\\]*)*'
 
 RE_COORD = re.compile(rb'/prop/direct/P625> "Point\(([-+0-9.eE]+) ([-+0-9.eE]+)\)"')
+# The second block are the *derived location* properties: an item that has no
+# P625 of its own but points at something that does. No human in Wikidata has a
+# coordinate, but over half have a place of birth. P106 (occupation) rides along
+# because it is what gives those people a subcategory. The trailing "> " in the
+# pattern anchors each alternative, so no id can be a prefix of another one.
 RE_ITEM = re.compile(
-    rb"/prop/direct/P(31|279|17|131|37)> <http://www\.wikidata\.org/entity/Q(\d+)> \."
+    rb"/prop/direct/P(17|19|20|31|37|106|131|159|276|279|504|532|551|840|937)>"
+    rb" <http://www\.wikidata\.org/entity/Q(\d+)> \."
 )
 RE_NUM = re.compile(rb'/prop/direct/P(1082|2044)> "([-+0-9.eE]+)"')
-RE_TIME = re.compile(rb'/prop/direct/P(571)> "([^"]+)"')
+# 571 inception, 569 date of birth, 570 date of death.
+RE_TIME = re.compile(rb'/prop/direct/P(569|570|571)> "([^"]+)"')
 RE_IRI = re.compile(rb"/prop/direct/P(18|856)> <([^>]*)>")
 RE_MONO = re.compile(rb'/prop/direct/P(1705|1448)> "(' + QUOTED + rb')"@([\w-]+)')
 RE_STR = re.compile(rb'/prop/direct/P(424)> "(' + QUOTED + rb')" \.')

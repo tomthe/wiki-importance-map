@@ -56,6 +56,7 @@ import numpy as np
 import polars as pl
 
 from pipeline import config
+from pipeline.build_tiles import spread_derived
 from pipeline.packfile import DEFAULT_PART_BYTES, PackWriter, remove_parts
 
 print = functools.partial(print, flush=True)
@@ -139,13 +140,20 @@ def main() -> None:
         pl.col("title_any"),
     )
     df = (
-        pl.read_parquet(
-            config.MASTER_PARQUET,
-            columns=[
-                "qid", "lon", "lat", "score", "cat", "country_label",
-                "n_countries",
-                "label_en", "title_en", "native_label", "title_any",
-            ],
+        # spread_derived before anything is filtered out: it numbers the items
+        # at each borrowed coordinate in score order, and build_tiles does the
+        # same on the same full table. Drop rows first and the numbering - and
+        # so the coordinates - would diverge from the tiles.
+        spread_derived(
+            pl.read_parquet(
+                config.MASTER_PARQUET,
+                columns=[
+                    "qid", "lon", "lat", "score", "cat", "country_label",
+                    "n_countries",
+                    "label_en", "title_en", "native_label", "title_any",
+                    "loc_pid", "loc_qid", "loc_pop",
+                ],
+            )
         )
         .with_columns(
             name_expr.alias("name"),
