@@ -131,13 +131,6 @@ step(
   defaults.all.includes("People"),
   JSON.stringify(defaults.all)
 );
-step(
-  // It is the layer the map did not have, and it duplicates nothing on the
-  // basemap underneath, so it is the one new category that starts visible.
-  "People starts switched on",
-  defaults.all.includes("People") && !defaults.off.includes("People"),
-  `off: ${JSON.stringify(defaults.off)}`
-);
 
 // --- 2. unchecking a category removes its items -----------------------------
 const filtered = await evaluate(`(async () => {

@@ -23,7 +23,7 @@ const DATA_URL = "data";
 // basemap says. Starting with them off makes the first view show the things
 // people came for, and both are one click away.
 //
-// People deliberately starts ON. It is the layer this map did not have, and
+// People deliberately starts off. It is the layer this map did not have, and
 // unlike Settlements it duplicates nothing underneath it.
 const DEFAULT_OFF = ["Settlements", "Administrative", "People"];
 
