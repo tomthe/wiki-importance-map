@@ -1,22 +1,31 @@
 # Wikipedia PageRank map
 
-Every geolocated Wikipedia article on a map, with label size driven by how
-important the subject is. Importance combines two independent signals:
-[danker](https://github.com/athalhammer/danker) PageRank over the link graph of
+Every geolocated Wikipedia article on a map, with the label size driven by how
+important the subject is. Importance combines two signals:
+[danker](https://github.com/athalhammer/danker) [PageRank](https://en.wikipedia.org/wiki/PageRank) over the link graph of
 *all* Wikipedia language editions, and
 [QRank](https://qrank.wmcloud.org/) pageviews.
 
 Plus two and a half million things that have no coordinate of their own but
 point at something that does: **people at their birthplace**, paintings at their
 museum, battles where they were fought, companies at their headquarters, ships
-at their home port, novels where they are set. No human in Wikidata has a
-P625 — and between them, those are most of what anyone actually looks up. They
-are drawn as hollow dots and the map never claims they are really there; see
-[Things that are not at a coordinate](#things-that-are-not-at-a-coordinate).
+at their home port, novels where they are set. They
+are drawn as hollow dots and spread around their birthplace/city.
+
+## Why?
+
+I wanted to get a better feeling for several of my favorite datasets!
+And I thought it would be a great [rabbitholing](https://en.wikipedia.org/wiki/Wiki_rabbit_hole) tool.
+
+
+
+
+## The code
+
+Sorry, most of the readme from here on is AI-written (As is the code. I wrote a working, but much less polished version, in May 2025. But with the help of AI it became much nicer in July 2026).
 
 The repository holds two things: a data pipeline that turns raw Wikimedia dumps
-into map tiles, and a static site that reads them. There is no server and no
-build step.
+into map tiles, and a static site that reads them. There is no server (even for the search).
 
 ```
 pipeline/   dumps -> articles.parquet -> tiles + search index
