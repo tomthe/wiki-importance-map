@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hack Map with deck.gl</title>
+  <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/@tarekraafat/autocomplete.js@10.2.7/dist/autoComplete.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@tarekraafat/autocomplete.js@10.2.7/dist/css/autoComplete.css">
+  <style>
+    body { margin: 0; }
+    #map { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div style="position: absolute; width:370px; top: 0; left: 0; z-index: 999; padding: 10px; background-color: rgba(255,255,255,0.8); font-family: sans-serif;">
+    <input id="autoComplete" type="search" dir="ltr" spellcheck=false autocorrect="off" autocomplete="off" autocapitalize="off" maxlength="2048" tabindex="1">
+    
+  <button onclick="zoomi = zoomi * 1.2; renderLayer();">Zoom In</button>
+  <button onclick="zoomi = zoomi / 1.2; renderLayer();">Zoom Out</button>
+  </div>
+  <div id="map"></div>
+
+  <script>
+    var zoomi = 1.3;
+    var minmaxxy = {'minx': -289.38, 'maxx': 360.0, 'miny': -90.0, 'maxy': 90.0};
+    const {DeckGL, TextLayer} = deck;
+    let deckgl;
+    let allData = [];
+    let datalevel = [];
+    const datasetname = new URLSearchParams(window.location.search).get('dataset') || 'wiki_map1' || 'oabig1';
+    const scalefactor = 1.0;
+
+    // Cache for previous values
+    let previousState = {
+      l: null,
+      x: null,
+      y: null
+    };
+
+    async function fetch_data(level = 0, x = 0, y = 0) {
+      try {
+        // const response1 = await fetch(`data/${datasetname}/base.tsv`);
+        const response = await fetch(`data/${datasetname}/tiles/l${level.toString().padStart(2, '0')}_${x.toString().padStart(3, '0')}_${y.toString().padStart(3, '0')}_dem.tsv`);
+        const text = await response.text();
+        
+        const fetchedData = text.split('\n').slice(1).map(row => {
+          const cols = row.split('\t');
+          return {
+            id: cols[0],
+            position: [parseFloat(cols[1]) * scalefactor, -parseFloat(cols[2]) * scalefactor],
+            label: cols[8]?.substring(0, 40) || '',
+            type: cols[3],
+            year: parseInt(cols[4]),
+            size: parseInt(cols[7]) || 1,
+            description1: cols[10],
+          };
+        });
+        return fetchedData;
+      } catch (error) {
+        throw new Error(`Error fetching data: ${error.message}`);
+      }
+    }
+
+    async function fetch_first_data(){
+      datalevel[0] = await fetch_data();
+      allData = datalevel[0];
+      initializeDeck();
+      initializeSearch();
+    }
+    fetch_first_data();
+
+    // Debounce function
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+    // Create debounced version of fetch_data
+    const debouncedFetch = debounce((l, x, y) => {
+      fetch_data(l, x, y).then(data => {
+        datalevel[l] = data;
+        allData = datalevel.flat();
+        renderLayer();
+      });
+    }, 1000); // 1 second delay
+
+    function calculate_lxy(viewState){
+      let l;
+      if (viewState.zoom > 12) {
+        l = 3;
+      } else if (viewState.zoom > 8) {
+        l = 2;
+      } else if (viewState.zoom > 4.5) {
+        l = 1;
+      } else {
+        l = 0;
+      }
+      // console.log("Level", l, viewState);
+      const lat = viewState.latitude;
+      const lon = viewState.longitude;
+      const nsubs = 4;
+      const n_subdivisions = Math.pow(nsubs,l);
+      // console.log("n_subdivisions", n_subdivisions, lat, lon, minmaxxy);
+      const onebasedposy = (-lat - minmaxxy.miny) / (minmaxxy.maxy - minmaxxy.miny);
+      const onebasedposx = (lon - minmaxxy.minx) / (minmaxxy.maxx - minmaxxy.minx)
+      // console.log("onebasedpos", onebasedposx, onebasedposy);
+      const x = Math.floor(onebasedposx  * n_subdivisions);
+      const y = Math.floor(onebasedposy  * n_subdivisions);
+      // console.log("lxy",l, x, y);
+      return [l, x, y];
+    }
+
+
+    function on_view_state_change({viewState}) {
+      // console.log('View state change:', viewState);
+      const zoom = viewState.zoom;
+      zoomi = zoom**1.3 ;
+      const [l, x, y] = calculate_lxy(viewState);
+      // Only fetch if values have changed
+      if (l !== previousState.l || 
+        x !== previousState.x || 
+        y !== previousState.y) {
+        
+        // Update previous state
+        previousState = { l, x, y };
+        
+        // Use debounced fetch
+        debouncedFetch(l, x, y);
+      }
+      renderLayer();
+    }
+
+    function initializeDeck() {
+      deckgl = new DeckGL({
+        mapStyle: 'https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json',
+        initialViewState: {
+          longitude: -122.45,
+          latitude: 37.8,
+          zoom: 1,
+          pitch: 0,
+          bearing: 0
+        },
+        controller: true,
+        onViewStateChange: on_view_state_change,
+        getTooltip: ({object}) => object && `${object.label}
+          Description: ${object.description1}
+          Type: ${object.type}
+          Size: ${object.size}
+        `
+      });
+      renderLayer();
+    }
+
+    function renderLayer() {
+      // console.log("Rendering Layer", zoomi);
+      // todo: render points in scatterplot layer, first filter data
+      const datascatter = allData.filter(d => d.size > 1 && d.size < 10);
+      const dataText = allData.filter(d => d.size > 10);
+
+      const myScatterLayer = new deck.ScatterplotLayer({
+        id: 'scatter-layer',
+        data: allData,
+        pickable: true,
+        opacity: 0.5,
+        stroked: false,
+        filled: true,
+        radiusScale: 26,
+        radiusMinPixels: 1,
+        radiusMaxPixels: 400,
+        lineWidthMinPixels: 1,
+        sizeScale: 2.3 * zoomi,
+        getPosition: d => d.position,
+        getRadius: d => Math.sqrt(d.size),
+        getFillColor: d => {
+          if(d.type === 'author') return [0, 0, 255];
+          if(d.type === 'article') return [205, 20, 200];
+          return [0, 128, 0];
+        },
+        getLineColor: [0, 0, 0]
+      });
+
+
+      const mytextLayer = new TextLayer({
+            id: 'text-layer',
+            data: allData,
+            pickable: true,
+            getPosition: d => d.position,
+            getText: d => d.label,
+            getSize: d => d.size**0.4 ,//* 2 * zoomi,
+            getColor: d => {
+              if(d.type === 'author') return [0, 0, 255];
+              if(d.type === 'article') return [255, 0, 0];
+              return [0, 128, 0];
+            },
+            getTextAnchor: 'middle',
+            getAlignmentBaseline: 'center',
+            sizeScale: .33 * zoomi,
+            sizeMinPixels : 5,
+            sizeMaxPixels : 70,
+            // sizeUnits: 'meters',
+            // collisionEnabled: noOverlap,
+            getCollisionPriority: d => Math.log10(d.size),
+            extensions: [new deck.CollisionFilterExtension()],
+            onClick: (info, event) => {console.log('Clicked:', info, event, info.object.label);
+              window.open(`https://en.wikipedia.org/wiki/${info.object.label}`, '_blank');
+            }
+          })
+      
+      deckgl.setProps({ layers: [mytextLayer,myScatterLayer] });
+    }
+
+
+
+    function initializeSearch() {
+      new autoComplete({
+        selector: '#autoComplete',
+        data: {
+          src: allData,
+          keys: ['label']
+        },
+        resultItem: {
+          highlight: true
+        }
+      });
+      document.querySelector("#autoComplete").addEventListener("selection", function (event) {
+          // "event.detail" carries the autoComplete.js "feedback" object
+          console.log(event.detail);
+          
+          const item = event.detail.selection.value;
+            console.log("Selected", item, event);
+            deckgl.setProps({
+              initialViewState: {
+                longitude: item.position[0],
+                latitude: item.position[1],
+                zoom: 10,
+                transitionDuration: 900
+              }
+            });
+      });
+    }
+  </script>
+</body>
+</html>
