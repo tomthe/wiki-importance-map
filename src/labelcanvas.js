@@ -270,12 +270,22 @@ export class LabelCanvas {
    * The item whose label is under a point, in CSS pixels, or null. Walked back
    * to front, so where labels do overlap - which only happens with collision
    * testing switched off - the one drawn on top is the one that answers.
+   *
+   * `slop` grows every box by that many pixels, for a finger: a 9 pixel label
+   * is a target a thumb cannot hit squarely, and the boxes are drawn in
+   * importance order so the enlarged ones still resolve in favour of the more
+   * important label where two of them come to overlap.
    */
-  pick(x, y) {
+  pick(x, y, slop = 0) {
     if (x == null || y == null) return null;
     for (let i = this.boxes.length - 1; i >= 0; i--) {
       const b = this.boxes[i];
-      if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return b.item;
+      if (
+        x >= b.x0 - slop && x <= b.x1 + slop &&
+        y >= b.y0 - slop && y <= b.y1 + slop
+      ) {
+        return b.item;
+      }
     }
     return null;
   }

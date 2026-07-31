@@ -29,6 +29,40 @@ const DEFAULT_OFF = ["Settlements", "Administrative", "People"];
 
 const $ = (id) => document.getElementById(id);
 
+// Two different questions, and conflating them is the usual mobile bug. `coarse`
+// is about the input device - how big a hit target has to be, whether hovering
+// exists at all - and is answered by the pointer, so a small desktop window
+// keeps its mouse behaviour and a large tablet does not. `narrow` is about how
+// much room there is to draw panels in.
+const coarsePointer = () =>
+  window.matchMedia?.("(pointer: coarse)").matches ?? false;
+const narrowScreen = () => window.matchMedia?.("(max-width: 640px)").matches ?? false;
+
+// Which device the person is actually using, from the last pointer event of any
+// kind. A hybrid laptop has both a mouse and a screen, so this cannot be decided
+// once at startup - and it cannot be decided from the event deck hands over
+// either, because a browser follows every tap with a *compatibility mouse*
+// sequence: mousemove, mousedown, mouseup, click, none of them PointerEvents and
+// none of them carrying a pointer type. Read that sequence literally and every
+// tap looks like a mouse arriving out of nowhere, which is exactly what made the
+// hover tooltip open behind the tap popup.
+let lastPointerWasTouch = coarsePointer();
+if (typeof window !== "undefined") {
+  const note = (event) => {
+    lastPointerWasTouch = event.pointerType === "touch" || event.pointerType === "pen";
+  };
+  for (const type of ["pointerdown", "pointermove", "pointerup"]) {
+    window.addEventListener(type, note, { capture: true, passive: true });
+  }
+}
+
+/** Whether a deck pointer event came from a finger. */
+function fromTouch(event) {
+  const type = event?.pointerType ?? event?.srcEvent?.pointerType ?? "";
+  if (type === "touch" || type === "pen") return true;
+  return lastPointerWasTouch;
+}
+
 const state = {
   theme: localStorage.getItem("wikimap-theme") ?? "light",
   viewState: { longitude: 8, latitude: 47, zoom: 3.4, pitch: 0, bearing: 0 },
@@ -145,13 +179,17 @@ let labelled = [];
 let labelTimer = null;
 
 /** Screen rectangles the labels should keep out of: the panels sit on top of
- *  the map, and a label underneath one is a label nobody can read. */
+ *  the map, and a label underneath one is a label nobody can read. MapLibre's
+ *  attribution counts - it is required to be legible, and on a phone it is a bar
+ *  across the whole bottom of the screen rather than a corner. */
 function panelRects() {
   const rects = [];
-  for (const id of ["controls", "status", "detail"]) {
-    const el = $(id);
+  const elements = ["controls", "status", "detail"].map($);
+  elements.push(document.querySelector(".maplibregl-ctrl-attrib"));
+  for (const el of elements) {
     if (!el || el.offsetParent === null) continue;
     const b = el.getBoundingClientRect();
+    if (!b.width || !b.height) continue;
     rects.push({ x0: b.left - 4, y0: b.top - 4, x1: b.right + 4, y1: b.bottom + 4 });
   }
   return rects;
@@ -254,15 +292,19 @@ const itemOf = (object) => (object && object.item ? object.item : object) ?? nul
  * Both are driven by deck's hover events, which fire on every pointer move
  * whether or not anything was picked.
  */
-function pickAt(info) {
-  return labelCanvas?.pick(info.x, info.y) ?? itemOf(info.object);
+function pickAt(info, slop = 0) {
+  return labelCanvas?.pick(info.x, info.y, slop) ?? itemOf(info.object);
 }
 
 // Read by getCursor. deck evaluates that when it handles a pointer event, so
 // this is at worst one event stale - a frame, and invisible.
 let hoveringItem = false;
 
-function onHover(info) {
+function onHover(info, event) {
+  // A finger dragging the map reports hover on everything it passes over. There
+  // is no pointer to follow, so following it would flash a tooltip through the
+  // middle of every pan; touch gets the tap popup in onClick instead.
+  if (fromTouch(event)) return;
   const item = pickAt(info);
   hoveringItem = Boolean(item);
   // Every pointer move arrives here, not just entering and leaving an item, so
@@ -275,9 +317,33 @@ function onHover(info) {
   }
 }
 
-function onClick(info) {
-  const item = pickAt(info);
-  if (item) detail.open(item);
+/** Open the full panel. On a phone that panel is a sheet across the bottom of
+ *  the screen, so the control panel is folded away at the same time: two cards
+ *  over a 390px map leaves no map. */
+function openDetail(item) {
+  tooltip.hide();
+  detail.open(item);
+  if (narrowScreen()) setCollapsed(true);
+  // The sheet covers part of the map, and labels underneath it cannot be read.
+  render({ reselect: true });
+}
+
+function onClick(info, event) {
+  // A fingertip is far wider than a 3px dot, so touch gets a few pixels of slop
+  // on the label boxes and a matching picking radius on the dots (set on the
+  // deck instance below).
+  const item = pickAt(info, fromTouch(event) ? 8 : 0);
+  if (!item) {
+    // A tap on empty map is how the popup is dismissed.
+    tooltip.hide();
+    return;
+  }
+  if (!fromTouch(event)) return openDetail(item);
+  // First tap: the cheap answer, out of the tile, with no network round trip.
+  // Second tap on the same thing (or on the popup, handled in ui.js): the
+  // article. Tapping a *different* item just moves the popup there.
+  if (tooltip.isShowing(item)) openDetail(item);
+  else tooltip.show(item, info.x, info.y, { touch: true });
 }
 
 function flyTo(longitude, latitude, zoom) {
@@ -313,26 +379,26 @@ async function applyTheme(theme) {
 
 // ----------------------------------------------------------------- controls
 
+function setCollapsed(collapsed) {
+  $("controls").classList.toggle("collapsed", collapsed);
+  $("collapse-btn").setAttribute("aria-expanded", String(!collapsed));
+  // The panel's footprint changed, so labels may now be free to use the space it
+  // used to cover (or need to avoid it again).
+  render({ reselect: true });
+}
+
 function wireControls() {
   $("theme-btn").addEventListener("click", () =>
     applyTheme(state.theme === "dark" ? "light" : "dark")
   );
 
   const controls = $("controls");
-  const collapseBtn = $("collapse-btn");
-  const setCollapsed = (collapsed) => {
-    controls.classList.toggle("collapsed", collapsed);
-    collapseBtn.setAttribute("aria-expanded", String(!collapsed));
-    // The panel's footprint changed, so labels may now be free to use the
-    // space it used to cover (or need to avoid it again).
-    render({ reselect: true });
-  };
-  collapseBtn.addEventListener("click", () =>
+  $("collapse-btn").addEventListener("click", () =>
     setCollapsed(!controls.classList.contains("collapsed"))
   );
   // Small screens: start collapsed so the panel is a compact bar rather than
   // a card that covers most of the map.
-  setCollapsed(window.matchMedia("(max-width: 640px)").matches);
+  setCollapsed(narrowScreen());
 
   const slider = (id, apply) => {
     const el = $(id);
@@ -400,6 +466,24 @@ function wireControls() {
     allOn = !allOn;
     filter.setAll(allOn);
   });
+
+  // Label size and label density are both counted in pixels, and a phone has a
+  // fifth of a laptop's - so the same two numbers put five times as many labels
+  // on screen and make the largest of them nearly a screen wide. Moving the
+  // slider is the whole of it: both keep their full range, so this changes where
+  // a phone starts and takes nothing away.
+  if (narrowScreen()) {
+    setSlider("labelscale", 90);
+    setSlider("labelbudget", 150);
+  }
+}
+
+/** Move a slider as if it had been dragged, so the value, the state and the
+ *  readout beside it cannot disagree. */
+function setSlider(id, value) {
+  const el = $(id);
+  el.value = String(value);
+  el.dispatchEvent(new Event("input"));
 }
 
 // ------------------------------------------------------------------- search
@@ -480,11 +564,26 @@ async function start() {
 
   if (link.view) state.viewState = { ...state.viewState, ...link.view };
 
+  const coarse = coarsePointer();
   deckgl = new deck.DeckGL({
     container: "map",
     mapStyle: await basemapStyle(state.theme),
     viewState: state.viewState,
-    controller: { doubleClickZoom: false, inertia: 250 },
+    controller: {
+      // Double-click zoom is off with a mouse because a click already means
+      // "open this" and the second one should not also move the map. On touch
+      // there is nothing else double-tap could mean, and every other map on a
+      // phone zooms with it.
+      doubleClickZoom: coarse,
+      // Two fingers on a phone means zoom, and rotating by accident leaves the
+      // map at a bearing the shareable URL does not carry.
+      dragRotate: !coarse,
+      touchRotate: false,
+      inertia: 250,
+    },
+    // A dot is between 1.4 and 9 pixels across and a fingertip is about 40, so
+    // an exact hit test is unusable with a thumb. Three pixels helps a mouse too.
+    pickingRadius: coarse ? 10 : 3,
     onViewStateChange,
     layers: [],
     // At the deck level rather than per layer, because the canvas renderer's
@@ -500,8 +599,16 @@ async function start() {
   // Inside #map, above deck's canvas. #map does not create a stacking context,
   // so the overlay's z-index still sits below the panels at 10.
   labelCanvas = new LabelCanvas($("map"));
+  // Where the labels ended up on screen, for the console and for
+  // tests/mobile_check.mjs - which has to tap one and cannot know where it is.
+  if (typeof window !== "undefined") window.labelBoxes = () => labelCanvas.boxes;
 
-  tooltip = new Tooltip($("tooltip"), { categories: manifest });
+  tooltip = new Tooltip($("tooltip"), {
+    categories: manifest,
+    // The tap that turns the popup into the article. Mouse users never reach
+    // this: the tooltip does not take the pointer unless it is in touch mode.
+    onActivate: (item) => openDetail(item),
+  });
   detail = new DetailPanel({
     panel: $("detail"),
     body: $("detail-body"),
@@ -517,7 +624,7 @@ async function start() {
     `${manifest.tileCount.toLocaleString()} tiles · zoom 0–${manifest.maxZoom} · ` +
     `${(manifest.pack.bytes / 1e6).toFixed(0)} MB in ${manifest.pack.parts.length} file(s)`;
 
-  window.addEventListener("resize", () => scheduleTiles());
+  window.addEventListener("resize", onResize);
   window.addEventListener("hashchange", onHashChange);
   $("loading").classList.add("hidden");
 
@@ -527,10 +634,24 @@ async function start() {
 
 function onViewStateChange({ viewState }) {
   state.viewState = viewState;
+  // The tap popup is pinned to a screen point, not to a coordinate, so as soon
+  // as the map moves under it it is pointing at the wrong thing. Hovered
+  // tooltips follow the pointer and need none of this.
+  if (tooltip?.touch) tooltip.hide();
   const items = render();      // immediate, from cache
   scheduleLabels(items ?? []); // re-declutter once the view settles
   scheduleTiles();             // fetch what is missing, without blocking the draw
   writeHash();
+}
+
+// Rotating a phone changes both the viewport and where the panels are, so the
+// tiles in view and the labels that fit both have to be worked out again.
+// Debounced, because a resize arrives as a stream of events.
+let resizeTimer = null;
+function onResize() {
+  scheduleTiles();
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => render({ reselect: true }), 200);
 }
 
 start().catch((err) => {

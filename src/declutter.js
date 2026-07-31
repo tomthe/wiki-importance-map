@@ -30,7 +30,19 @@
 import { FONT_FAMILY, FONT_WEIGHT } from "./layers.js";
 
 const CELL = 20; // px; smaller than a label, so a box covers several cells
-const MARGIN = 140; // px of off-screen slack, so labels do not pop at the edge
+const MARGIN = 140; // px of off-screen slack, for the cheap reject below
+
+// A label the screen edge cuts in half is unreadable in exactly the way a label
+// under a panel is, so the edge is an obstacle too - but the answer is to slide
+// the label inward, not to drop it. That is the displacement the crowding pass
+// already does, with the same leader line to say which dot it belongs to, so a
+// name at the edge costs a few pixels of offset instead of disappearing.
+//
+// It matters most where there is least room. On a 390px phone the old rule spent
+// a third of the width drawing "nationale de France" with nothing under it;
+// simply refusing those labels instead cost a third of *all* the labels on a
+// desktop, because the boxes near an edge are the wide important ones.
+const EDGE = 2;
 
 // Beyond this a label reads as belonging to nothing, so it is better to drop it.
 const MAX_DISPLACEMENT = 3;
@@ -127,12 +139,31 @@ export function selectLabels({
       continue;
     }
 
+    // An item whose own dot is off screen has nothing visible for a label to
+    // belong to - a name half cut off by the edge with no dot under it reads as
+    // an artefact rather than as a place - so it waits until it is on screen.
+    if (x < EDGE || y < EDGE || x > width - EDGE || y > height - EDGE) continue;
+
     const size = sizeOf(item);
     const halfW = (emWidth(item.title) * size) / 2 + 3;
     const halfH = size / 2 + 2;
 
+    // Where the centre of the box may go for the whole of it to be on screen. A
+    // name wider than the screen has nowhere at all, and is dropped: it could
+    // only ever be drawn with both ends cut off.
+    const minX = EDGE + halfW;
+    const maxX = width - EDGE - halfW;
+    const minY = EDGE + halfH;
+    const maxY = height - EDGE - halfH;
+    if (maxX < minX || maxY < minY) continue;
+
     let placed = null;
-    for (const [dx, dy] of placements(halfW, halfH, spread)) {
+    for (const [ox, oy] of placements(halfW, halfH, spread)) {
+      // Each candidate is pulled back inside the screen before it is tested, so
+      // the collision test and the leader line both use where the label really
+      // ends up.
+      const dx = Math.min(Math.max(x + ox, minX), maxX) - x;
+      const dy = Math.min(Math.max(y + oy, minY), maxY) - y;
       const cx0 = Math.floor((x + dx - halfW) / CELL);
       const cx1 = Math.floor((x + dx + halfW) / CELL);
       const cy0 = Math.floor((y + dy - halfH) / CELL);

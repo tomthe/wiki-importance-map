@@ -610,6 +610,7 @@ For the site itself, start a headless Chromium with
 node tests/hash_check.mjs                          # no browser needed
 node tests/browser_check.mjs http://localhost:8000/ shot.png
 node tests/interaction_check.mjs http://localhost:8000/
+node tests/mobile_check.mjs http://localhost:8000/ phone.png
 ```
 
 `hash_check` round-trips the category selection through its URL form and is
@@ -638,6 +639,18 @@ Order matters in that file. The default-selection check has to come first,
 because later steps switch categories on deliberately — and the crowding steps
 need them all on, or too few labels fit for any of the caps to bind and they
 would assert nothing.
+
+`mobile_check` runs the same browser as a 390×844 phone with touch emulation and
+real `Input.dispatchTouchEvent` taps, because none of what it covers is visible at
+desktop size: that the status box is gone, that the panel fits the screen and
+scrolls, that a tap opens the popup and a tap on the popup opens the panel, that
+the panel arrives as a bottom sheet, that a tap on empty map dismisses and a drag
+never opens anything, and that a search result can be picked with a finger — that
+last one because the rows are chosen on `mousedown`, which a browser also sends
+after a tap, but only when the tap did not turn into a scroll. It taps a real
+label, so it needs to know where one is: `window.labelBoxes()` reports the
+screen rectangles the label canvas last drew, and it is a console aid as much as
+a test seam. It writes two screenshots, the popup and the sheet.
 
 There is no Node on this machine's PATH; the scripts run under the Node bundled
 inside VS Code (`ELECTRON_RUN_AS_NODE=1 "…/Code.exe" script.mjs`), and the
@@ -686,7 +699,31 @@ detect that it happened. `declutter.js` does the same job in JS — walk
 candidates in importance order, keep a label if its box does not touch a box
 already kept, stop at the budget — which costs a few milliseconds and always
 gives the same answer. It also reserves the panel rectangles, so no label is
-drawn where a panel would cover it.
+drawn where a panel would cover it, and MapLibre's attribution bar counts as one
+of them: on a phone it runs the whole width of the screen.
+
+**The screen edge is an obstacle too.** A name the edge cuts in half is
+unreadable in exactly the way a name under a panel is, so a label that does not
+fit is slid inward — the same displacement the crowding pass already does, with
+the same leader line to say which dot it belongs to. An item whose *own dot* is
+off screen is skipped instead: half a name with nothing under it reads as an
+artefact rather than as a place.
+
+Measured on a 1376×774 window at the opening view, that is not a trade:
+
+| | before | after |
+|---|---|---|
+| labels selected | 89 | 56 |
+| wholly on screen | 50 | **56** |
+| cut by an edge | 15 | 0 |
+| selected but entirely off screen | 24 | 0 |
+
+Two thirds of what the old pass produced at the edges was invisible or
+illegible, and it was counted against the density budget and the collision grid
+either way. Refusing the edge labels outright was tried first and cost a third of
+*all* labels — the boxes near an edge are the wide important ones — which is why
+they slide instead. The "labels" figure in the status line means something
+different now, and what it means is what it says.
 
 The selection is recomputed when the view settles (130 ms), not per frame:
 labels are anchored to the map, so the set stays correct while panning, and
@@ -827,6 +864,51 @@ elevation, founding year and both importance signals — all of it out of the
 tile, so nothing is fetched while panning. Clicking opens a panel that adds the
 Wikipedia summary and thumbnail for that one item from the REST API, with links
 to Wikipedia, Wikidata, OpenStreetMap and Google Maps.
+
+### On a phone
+
+A touch screen cannot hover, and the interaction above is built out of hovering:
+the cheap answer on the way past, the expensive one on demand. So the two steps
+become two taps. **One tap opens the hover box as a popup** — the same content,
+out of the same tile, no network — and **a tap on the popup opens the article
+panel.** A tap anywhere else on the map dismisses it, and panning dismisses it
+too, because the popup is pinned to a screen point rather than to a coordinate.
+Going straight to the panel on the first tap was the alternative, and it means
+fetching a Wikipedia summary for every dot a thumb brushes.
+
+Deciding whether a tap *is* a tap is the part that took a second try. A browser
+follows every tap with a compatibility mouse sequence — `mousemove`, `mousedown`,
+`mouseup`, `click` — none of them `PointerEvent`s and none of them carrying a
+pointer type. Read literally, every tap looks like a mouse arriving out of
+nowhere, and the hover tooltip opened underneath the tap popup. `src/main.js`
+keeps the last real pointer type from a window-level listener instead, so a
+hybrid laptop still switches behaviour mid-session between its mouse and its
+screen.
+
+The rest is sizing, and the theme is that a phone has a fifth of a laptop's
+pixels while everything on the map is measured in them:
+
+* **The status line is gone below 640px.** Five diagnostics need about 380px to
+  say anything, and it was covering the map to say it. Only the loading pulse
+  survives, as a dot. It is still computed, because the desktop checks read it.
+* **The detail panel becomes a bottom sheet**, and opening it folds the control
+  panel away: two 320px cards over a 390px map leave no map.
+* **Label size starts at 0.9× and density at 150**, against 1.3× and 300. At the
+  desktop defaults the largest label is nearly a screen wide. Both sliders keep
+  their full range — only where a phone starts moves.
+* **Everything below the search box scrolls**, so the panel fits a landscape
+  phone, with the attribution at the end of it rather than in the fixed header.
+  Sizes come from `100dvh`: on a phone `100vh` is the *large* viewport, and a
+  panel sized to it puts its last rows under the browser's own chrome.
+* **Hit targets follow `(pointer: coarse)`, not the width** — a small desktop
+  window still has a mouse, and a large tablet does not. Buttons, rows and
+  checkboxes grow, the dots get a 10px picking radius against their 1.4–9px of
+  ink, the labels get 8px of slop, and the search field goes to 16px, which is
+  the threshold under which iOS Safari zooms the whole page on focus.
+* **Double-tap zooms and two fingers do not rotate.** Double-click zoom stays off
+  for a mouse, where a click already means "open this"; on touch there is nothing
+  else a double-tap could mean. Rotation is off because an accidental bearing is
+  not in the shareable URL.
 
 ### Sharing a view
 

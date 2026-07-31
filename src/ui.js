@@ -68,15 +68,47 @@ function yearLabel(manifest, item) {
   return item.cat === manifest?.peopleCat ? "Born" : "Founded";
 }
 
+/**
+ * The hover box, which on a touch screen is not a hover box.
+ *
+ * With no pointer there is no hover, so the two-step - look, then commit -
+ * has to be built out of taps: the first tap opens this, a tap on this opens
+ * the detail panel, a tap anywhere else dismisses it. That keeps the cheap
+ * answer cheap; going straight to the panel on every tap would fetch a
+ * Wikipedia summary for every dot anybody brushed with a thumb.
+ *
+ * `onActivate` is what the second tap calls. It is a click on this element
+ * rather than a second pick from the map, because in touch mode the popup
+ * takes the pointer and is usually sitting under the finger anyway.
+ */
 export class Tooltip {
-  constructor(element, { categories }) {
+  constructor(element, { categories, onActivate = null }) {
     this.el = element;
     this.categories = categories;
+    this.onActivate = onActivate;
+    this.item = null;
+    this.touch = false;
+    element.addEventListener("click", (event) => {
+      if (!this.item) return;
+      const item = this.item;
+      const dismiss = event.target.closest?.(".t-dismiss");
+      this.hide();
+      if (!dismiss) this.onActivate?.(item);
+    });
   }
 
-  show(item, x, y) {
+  /** True when the popup is already open on this item - the state in which a
+   *  second tap on the map means "open it properly" rather than "reopen". */
+  isShowing(item) {
+    return Boolean(item) && this.item === item;
+  }
+
+  show(item, x, y, { touch = false } = {}) {
     if (!item) return this.hide();
     this.el.textContent = "";
+    this.item = item;
+    this.touch = touch;
+    this.el.classList.toggle("touch", touch);
 
     const name = document.createElement("div");
     name.className = "t-name";
@@ -117,6 +149,18 @@ export class Tooltip {
       (item.wiki ? "" : " · no article");
     this.el.append(rank);
 
+    if (touch) {
+      const more = document.createElement("div");
+      more.className = "t-more";
+      const open = document.createElement("span");
+      open.textContent = item.wiki ? "Tap for the article →" : "Tap for details →";
+      const dismiss = document.createElement("span");
+      dismiss.className = "t-dismiss";
+      dismiss.textContent = "close";
+      more.append(open, dismiss);
+      this.el.append(more);
+    }
+
     this.el.style.display = "block";
     // Measured once here and kept for move(): the map reports every pointer
     // move, and reading the box on each one would put a forced layout on the
@@ -125,17 +169,32 @@ export class Tooltip {
     this.move(x, y);
   }
 
-  /** Reposition without rebuilding, keeping the tooltip clear of the right and
-   *  bottom edges. Same content, so the size measured by show() still holds. */
+  /** Reposition without rebuilding, keeping the tooltip inside the window. Same
+   *  content, so the size measured by show() still holds. */
   move(x, y) {
     if (!this.box) return;
-    this.el.style.left = `${Math.min(x + 14, window.innerWidth - this.box.width - 8)}px`;
-    this.el.style.top = `${Math.min(y + 14, window.innerHeight - this.box.height - 8)}px`;
+    const pad = 8;
+    let left = x + 14;
+    let top = y + 14;
+    if (this.touch) {
+      // A finger covers what it tapped, so the popup is centred above the tap
+      // rather than below and right of it, and flips below only when the tap
+      // was near the top of the screen.
+      left = x - this.box.width / 2;
+      top = y - this.box.height - 20;
+      if (top < pad) top = y + 24;
+    }
+    const clamp = (v, extent) => Math.max(pad, Math.min(v, extent - pad));
+    this.el.style.left = `${clamp(left, window.innerWidth - this.box.width)}px`;
+    this.el.style.top = `${clamp(top, window.innerHeight - this.box.height)}px`;
   }
 
   hide() {
     this.el.style.display = "none";
+    this.el.classList.remove("touch");
     this.box = null;
+    this.item = null;
+    this.touch = false;
   }
 }
 
