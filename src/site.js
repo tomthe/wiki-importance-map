@@ -151,9 +151,10 @@ function voyage(manifest) {
     name: "voyage",
     articleHost: (lang) => `https://${lang || "en"}.wikivoyage.org`,
     articleLabel: (lang) => (lang === "en" ? "Wikivoyage" : `Wikivoyage (${lang})`),
-    // The four sections that make a map dense without making it more useful for
-    // deciding where to go. All a click away.
-    defaultOff: ["Buy", "Eat", "Drink", "Sleep", "Go", "Practical"],
+    // Destinations start off: their names are mostly what the basemap would say
+    // anyway, and with them on, the cities crowd out the things to see and do in
+    // them. One click away.
+    defaultOff: ["Destination"],
     thingsName: "places",
     dataNote: (m) =>
       `${m.destinationCount.toLocaleString()} destinations and ` +

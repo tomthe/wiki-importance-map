@@ -1047,7 +1047,7 @@ retires the "git cannot forget" problem rather than managing it.
 Note Cloudflare *Pages* is out regardless: it caps at 20,000 files, and it
 capped at 20,000 files back when there were 183,437 of them too.
 
-`index.html` still pulls MapLibre and deck.gl from unpkg. Vendor both if you
+`index.html` still pulls MapLibre and deck.gl from jsDelivr (unpkg failed TLS on some networks). Vendor both if you
 care about a third party's outage being your white screen.
 
 ## The travel map
