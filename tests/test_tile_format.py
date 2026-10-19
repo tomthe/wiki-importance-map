@@ -171,10 +171,28 @@ CASES = [
                 year=NO_INT16 + 1, elev=NO_INT16 + 1, pop=0),
         ],
     },
+    {
+        # The travel map's tiles: thirteen extra bytes per row (twelve months and
+        # a guide status), column by column. Three rows make 39 bytes, so the
+        # block needs padding before the admin offsets - and the admin table and
+        # the strings after it are what break if it is wrong.
+        "name": "extra byte columns, odd total length",
+        "rows": [
+            row(64, 13.06, 52.4, 40000, 40000, 45000, 1, 1, FLAG_HAS_WIKI,
+                "Potsdam", "en|", descr="capital of Brandenburg", admin="Brandenburg"),
+            row(0x80000001, 13.04, 52.40, 30000, 30000, 35000, 2, 3, FLAG_HAS_WIKI,
+                "Sanssouci Palace", "en|Potsdam", admin="Potsdam"),
+            row(0x81000002, 13.05, 52.39, 20000, 20000, 25000, 5, 1, FLAG_HAS_WIKI,
+                "Café am Neuen Markt", "de|Potsdam", admin="Potsdam"),
+        ],
+        "extras": [
+            [m * 20, 255 - m * 20, 255 if m == 6 else 0] for m in range(12)
+        ] + [[2, 0, 0]],
+    },
 ]
 
 
-def build(rows: list[dict]) -> tuple[bytes, list[dict]]:
+def build(rows: list[dict], extras=None) -> tuple[bytes, list[dict]]:
     def col(name, dtype):
         return np.array([r[name] for r in rows], dtype=dtype)
 
@@ -198,13 +216,14 @@ def build(rows: list[dict]) -> tuple[bytes, list[dict]]:
             "wiki": [r["wiki"] for r in rows],
             "descr": [r["descr"] for r in rows],
             "admin": [r["admin"] for r in rows],
+            **({"extras": np.array(extras, dtype=np.uint8)} if extras else {}),
         },
         z=5,
         x=17,
         y=11,
     )
     expected = []
-    for r in rows:
+    for i, r in enumerate(rows):
         wiki = wiki_lang = None
         if r["flags"] & FLAG_HAS_WIKI:
             lang, _, article = r["wiki"].partition("|")
@@ -234,6 +253,7 @@ def build(rows: list[dict]) -> tuple[bytes, list[dict]]:
                 "score": round(r["score"] / 65535, 3),
                 "pr": round(r["pr"] / 65535, 3),
                 "qr": round(r["qr"] / 65535, 3),
+                "extra": [column[i] for column in extras] if extras else None,
             }
         )
     return payload, expected
@@ -250,7 +270,7 @@ def main() -> None:
         countries_path = Path(tmp) / "countries.json"
         countries_path.write_text(json.dumps(COUNTRIES), encoding="utf-8")
         for case in CASES:
-            payload, expected = build(case["rows"])
+            payload, expected = build(case["rows"], case.get("extras"))
             path = Path(tmp) / "tile.bin"
             path.write_bytes(payload)
             proc = subprocess.run(

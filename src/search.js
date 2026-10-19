@@ -166,7 +166,7 @@ export class Search {
     this.results.textContent = "";
     if (!this.current.length) return this.close();
     this.current.forEach((entry, i) => {
-      const [name, , , , , cat, country] = entry;
+      const [name, , , , , cat, country, where] = entry;
       const row = document.createElement("div");
       row.className = "result";
       row.setAttribute("role", "option");
@@ -182,9 +182,10 @@ export class Search {
 
       const kind = document.createElement("span");
       kind.className = "cat";
-      // Two Springfields look identical without the country.
+      // Two Springfields look identical without the country - and four hundred
+      // "Hotel Central"s without the town, which is what `where` is, when set.
       kind.textContent =
-        this.countries[country] ?? this.categories.categories[cat]?.name ?? "";
+        where ?? this.countries[country] ?? this.categories.categories[cat]?.name ?? "";
 
       row.append(swatch, label, kind);
       row.addEventListener("mousedown", (event) => {

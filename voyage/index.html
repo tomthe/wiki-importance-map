@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en" data-site="voyage">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Wikivoyage travel map</title>
+  <meta name="description" content="Every Wikivoyage destination and listing on a map, sized by how many travellers read about it - month by month." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23578c19'/%3E%3Ccircle cx='11' cy='12' r='3.4' fill='%23fff'/%3E%3Ccircle cx='21' cy='19' r='2.2' fill='%23fff'/%3E%3Ccircle cx='13' cy='22' r='1.5' fill='%23fff'/%3E%3C/svg%3E" />
+
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/deck.gl@9.3.7/dist.min.js"></script>
+
+  <!-- Same stylesheet and same modules as the Wikipedia map; data-site above is
+       what makes them behave as the travel map, and data/ here is voyage/data/. -->
+  <link rel="stylesheet" href="../src/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="controls" class="panel">
+    <header>
+      <h1>Wikivoyage travel map</h1>
+      <button class="icon-btn" id="theme-btn" title="Toggle light / dark">◐</button>
+      <button class="icon-btn" id="collapse-btn" title="Collapse / expand panel" aria-expanded="true">▾</button>
+    </header>
+
+    <!-- Outside the scroll region and kept when the panel is collapsed: the
+         month is the one control worth having on screen at all times, and on a
+         phone the panel spends most of its life collapsed. -->
+    <div class="when-bar">
+      <div class="section-title">When <output id="month-out" class="section-out">the whole year</output></div>
+      <div id="months" class="months" role="group" aria-label="Month"></div>
+    </div>
+
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="Search places…" autocomplete="off"
+             spellcheck="false" aria-label="Search places" />
+      <div id="results" role="listbox"></div>
+    </div>
+
+    <div class="scroll">
+      <div class="slider-row">
+        <label for="season">Most viewed ↔ In season</label>
+        <output id="season-out">balanced</output>
+        <input id="season" type="range" min="0" max="100" value="50" disabled />
+      </div>
+      <p class="hint">Pick a month to size everything by how much it is read
+        about then. Towards “in season”, places busier than in their average
+        month grow and year-round favourites shrink.</p>
+
+      <div class="section-title">
+        Categories
+        <button id="cat-all" type="button">all / none</button>
+      </div>
+      <div id="categories"></div>
+
+      <div class="section-title">Labels</div>
+      <div class="slider-row">
+        <label for="labelscale">Label size</label>
+        <output id="labelscale-out">1.3×</output>
+        <input id="labelscale" type="range" min="50" max="200" value="130" />
+      </div>
+      <div class="slider-row">
+        <label for="maxscore">Maximum importance</label>
+        <output id="maxscore-out">all</output>
+        <input id="maxscore" type="range" min="0" max="100" value="100" />
+      </div>
+      <p class="hint">Turn it down to hide the most-read places and find the
+        quieter ones around them.</p>
+      <div class="slider-row">
+        <label for="labelbudget">Label density</label>
+        <output id="labelbudget-out">300</output>
+        <input id="labelbudget" type="range" min="50" max="1500" step="50" value="300" />
+      </div>
+      <label class="cat-row" style="margin-top:6px">
+        <input type="checkbox" id="spread" checked />
+        <span class="name">Move crowded labels aside</span>
+      </label>
+      <label class="cat-row">
+        <input type="checkbox" id="show-all" />
+        <span class="name">Show all labels, overlapping</span>
+      </label>
+      <label class="cat-row">
+        <input type="checkbox" id="color-by-cat" checked/>
+        <span class="name">Colour labels by category</span>
+      </label>
+      <p class="hint">A listing has no pageviews of its own: it is ranked by the
+        guide it is listed in, then by what it is and how high up it was listed.</p>
+      <p class="hint" id="search-note"></p>
+      <p class="hint" id="data-note"></p>
+
+      <p class="attribution">Articles and listings from
+        <a href="https://www.wikivoyage.org/">Wikivoyage</a> (CC BY-SA) ·
+        <a href="https://dumps.wikimedia.org/other/pageview_complete/">pageviews</a> Nov 2022 – Oct 2024 ·
+        coordinates from <a href="https://wikidata.org/">Wikidata</a> ·
+        <a href="../">the Wikipedia importance map</a> ·
+        <a href="https://github.com/tomthe/wiki-importance-map">source</a>
+      </p>
+    </div>
+  </div>
+
+  <div id="status" class="panel"><span class="dot"></span><span id="status-text">starting…</span></div>
+
+  <aside id="detail" class="panel">
+    <button class="icon-btn close" id="detail-close" title="Close">✕</button>
+    <div class="body" id="detail-body"></div>
+  </aside>
+
+  <div id="tooltip"></div>
+  <div id="loading">loading map data…</div>
+
+  <script type="module" src="../src/main.js"></script>
+</body>
+</html>

@@ -5,13 +5,18 @@
 //   0   "WMT2", uint16 version, uint16 z
 //   8   uint32 x, uint32 y, uint32 count
 //   20  uint32 titleBytes, wikiBytes, descrBytes
-//   32  uint32 adminCount, adminBytes, reserved, reserved
+//   32  uint32 adminCount, adminBytes, extraCount k, reserved
 //   48  qid u32[n], titleOff u32[n+1], wikiOff u32[n+1], descrOff u32[n+1],
 //       lon f32[n], lat f32[n], population u32[n],
 //       score u16[n], pr u16[n], qr u16[n], country u16[n], admin u16[n],
 //       elevation i16[n], year i16[n],                            (pad to 4)
 //       cat u8[n], sub u8[n], flags u8[n], sitelinks u8[n],
+//       extras u8[k][n],                                          (pad to 4)
 //       adminOff u32[adminCount+1], adminBlob, titles, wikis, descrs
+//
+// `extras` is empty in the Wikipedia map's tiles. The travel map keeps twelve
+// monthly pageview shares and a guide status there, and an item gets them as
+// `extra`, a plain array of k bytes - what they mean is the manifest's business.
 //
 // Items with a non-zero location source are drawn at somebody else's
 // coordinate - a person at their birthplace, a painting at its museum. The
@@ -56,6 +61,7 @@ export function decodeTile(buffer, countries = []) {
   const descrBytes = view.getUint32(28, true);
   const adminCount = view.getUint32(32, true);
   const adminBytes = view.getUint32(36, true);
+  const extraCount = view.getUint32(40, true);
 
   let o = 48;
   const qid = new Uint32Array(buffer, o, n); o += 4 * n;
@@ -77,6 +83,8 @@ export function decodeTile(buffer, countries = []) {
   const sub = new Uint8Array(buffer, o, n); o += n;
   const flags = new Uint8Array(buffer, o, n); o += n;
   const sitelinks = new Uint8Array(buffer, o, n); o += n;
+  const extras = new Uint8Array(buffer, o, extraCount * n); o += extraCount * n;
+  o += (4 - ((extraCount * n) % 4)) % 4;
   const adminOff = new Uint32Array(buffer, o, adminCount + 1); o += 4 * (adminCount + 1);
   const adminBlob = new Uint8Array(buffer, o, adminBytes); o += adminBytes;
   const titleBlob = new Uint8Array(buffer, o, titleBytes); o += titleBytes;
@@ -132,6 +140,11 @@ export function decodeTile(buffer, countries = []) {
       cat: cat[i],
       sub: sub[i],
     };
+    if (extraCount) {
+      const extra = new Array(extraCount);
+      for (let j = 0; j < extraCount; j++) extra[j] = extras[j * n + i];
+      items[i].extra = extra;
+    }
   }
   return { z, x, y, items, bytes: buffer.byteLength };
 }

@@ -6,18 +6,67 @@
 // descr_en cost about 20% on the tile pyramid and it is the single line that
 // most often makes a label make sense.
 //
-// The one thing still fetched on demand is the Wikipedia summary and its
+// The one thing still fetched on demand is the article summary and its
 // thumbnail, for the one item that was clicked - a paragraph of prose and a
 // picture per item would be several gigabytes in the tiles, and nobody reads
 // more than a handful per session.
+//
+// Which wiki the article is on, and which facts are worth a line, is the
+// site's business (src/site.js): the same panels serve Wikipedia and
+// Wikivoyage.
 
-const wikiHost = (lang) => `https://${lang || "en"}.wikipedia.org`;
-const articleUrl = (lang, title) =>
-  `${wikiHost(lang)}/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
-const summaryUrl = (lang, title) =>
-  `${wikiHost(lang)}/api/rest_v1/page/summary/${encodeURIComponent(
+import { monthShares } from "./site.js";
+
+const articleUrl = (site, lang, title) =>
+  `${site.articleHost(lang)}/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
+const summaryUrl = (site, lang, title) =>
+  `${site.articleHost(lang)}/api/rest_v1/page/summary/${encodeURIComponent(
     title.replace(/ /g, "_")
   )}`;
+
+const SVG = "http://www.w3.org/2000/svg";
+
+/**
+ * Twelve bars, one per month, scaled to the item's busiest month - the shape of
+ * its year at a glance. The selected month is drawn in the accent colour, so
+ * moving the month row shows where in that shape the map is looking.
+ */
+export function seasonChart(item, month, { width = 120, height = 22, labels = false } = {}) {
+  const shares = monthShares(item);
+  if (!shares) return null;
+  const peak = Math.max(...shares);
+  const labelRoom = labels ? 11 : 0;
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("class", "season-chart");
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height + labelRoom));
+  svg.setAttribute("viewBox", `0 0 ${width} ${height + labelRoom}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "pageviews by month");
+  const slot = width / 12;
+  const letters = "JFMAMJJASOND";
+  for (let m = 0; m < 12; m++) {
+    const h = Math.max(1, (shares[m] / peak) * height);
+    const bar = document.createElementNS(SVG, "rect");
+    bar.setAttribute("x", (m * slot + 1).toFixed(1));
+    bar.setAttribute("y", (height - h).toFixed(1));
+    bar.setAttribute("width", Math.max(1, slot - 2).toFixed(1));
+    bar.setAttribute("height", h.toFixed(1));
+    bar.setAttribute("rx", "1");
+    bar.setAttribute("class", m + 1 === month ? "bar on" : "bar");
+    svg.append(bar);
+    if (labels) {
+      const t = document.createElementNS(SVG, "text");
+      t.setAttribute("x", (m * slot + slot / 2).toFixed(1));
+      t.setAttribute("y", String(height + 9));
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("class", m + 1 === month ? "lbl on" : "lbl");
+      t.textContent = letters[m];
+      svg.append(t);
+    }
+  }
+  return svg;
+}
 
 const nf = new Intl.NumberFormat();
 
@@ -45,7 +94,7 @@ export function formatYear(year) {
  * Without the preposition the line would read exactly like a place's own
  * address and quietly assert that Einstein is a point in southern Germany.
  */
-export function formatPlace(item, manifest) {
+export function formatPlace(item, manifest, site = null) {
   const parts = [];
   if (item.admin && item.admin !== item.title) parts.push(item.admin);
   if (item.country && item.country !== item.title && item.country !== item.admin) {
@@ -53,7 +102,9 @@ export function formatPlace(item, manifest) {
   }
   const where = parts.join(", ");
   if (!where) return "";
-  const phrase = item.derived ? manifest?.locSources?.[item.locSrc] : "";
+  const phrase = item.derived
+    ? manifest?.locSources?.[item.locSrc]
+    : site?.placePhrase?.(item) ?? "";
   return phrase ? `${phrase} ${where}` : where;
 }
 
@@ -82,9 +133,11 @@ function yearLabel(manifest, item) {
  * takes the pointer and is usually sitting under the finger anyway.
  */
 export class Tooltip {
-  constructor(element, { categories, onActivate = null }) {
+  constructor(element, { categories, site, style, onActivate = null }) {
     this.el = element;
     this.categories = categories;
+    this.site = site;
+    this.style = style;
     this.onActivate = onActivate;
     this.item = null;
     this.touch = false;
@@ -128,7 +181,7 @@ export class Tooltip {
 
     // Facts worth reading at a glance, and only the ones this item has.
     const facts = [
-      formatPlace(item, this.categories),
+      formatPlace(item, this.categories, this.site),
       item.pop != null ? `pop. ${formatPopulation(item.pop)}` : null,
       item.elev != null ? `${nf.format(item.elev)} m` : null,
       formatYear(item.year),
@@ -142,11 +195,11 @@ export class Tooltip {
 
     const rank = document.createElement("div");
     rank.className = "t-rank";
-    rank.textContent =
-      `importance ${(item.score * 100).toFixed(0)} · ` +
-      `links ${(item.pr * 100).toFixed(0)} · views ${(item.qr * 100).toFixed(0)}` +
-      (item.sitelinks ? ` · ${item.sitelinks} languages` : "") +
-      (item.wiki ? "" : " · no article");
+    rank.textContent = this.site.rankLine(item);
+    if (this.site.hasSeasons) {
+      const chart = seasonChart(item, this.style.month, { width: 96, height: 16 });
+      if (chart) rank.prepend(chart);
+    }
     this.el.append(rank);
 
     if (touch) {
@@ -199,10 +252,12 @@ export class Tooltip {
 }
 
 export class DetailPanel {
-  constructor({ panel, body, closeButton, categories }) {
+  constructor({ panel, body, closeButton, categories, site, style }) {
     this.panel = panel;
     this.body = body;
     this.categories = categories;
+    this.site = site;
+    this.style = style;
     this.controller = null;
     closeButton.addEventListener("click", () => this.close());
   }
@@ -228,7 +283,7 @@ export class DetailPanel {
     meta.className = "meta";
     meta.textContent = [
       kindOf(this.categories, item),
-      formatPlace(item, this.categories),
+      formatPlace(item, this.categories, this.site),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -237,11 +292,17 @@ export class DetailPanel {
     figure.alt = "";
     figure.hidden = true;
 
-    // The tile's own one-line description shows immediately; the Wikipedia
+    // The tile's own one-line description shows immediately; the article's
     // summary replaces it when it lands, and it stays if that request fails.
+    const site = this.site;
+    const fetchSummary = site.summaryFor(item);
     const extract = document.createElement("p");
     extract.className = "extract";
-    extract.textContent = item.descr || (item.wiki ? "Loading summary…" : "");
+    extract.textContent = item.descr || (fetchSummary ? "Loading summary…" : "");
+
+    const chart = site.hasSeasons
+      ? seasonChart(item, this.style.month, { width: 288, height: 34, labels: true })
+      : null;
 
     const facts = document.createElement("dl");
     const addFact = (key, value) => {
@@ -267,18 +328,15 @@ export class DetailPanel {
         item.admin || "an unnamed place"
       );
       addFact("Position", "approximate — spread around that place");
+    } else if (site.placePhrase(item)) {
+      addFact("Listed in", item.admin);
     } else {
-      addFact("Admin area", item.admin);
+      addFact(site.hasSeasons ? "Part of" : "Admin area", item.admin);
     }
-    addFact(
-      "Language editions",
-      item.sitelinks ? (item.sitelinks >= 255 ? "255+" : String(item.sitelinks)) : null
-    );
-    addFact("Importance", `${(item.score * 100).toFixed(1)} / 100`);
-    addFact("PageRank", `${(item.pr * 100).toFixed(1)} / 100`);
-    addFact("Pageviews", `${(item.qr * 100).toFixed(1)} / 100`);
+    site.facts(item, addFact);
     if (!item.derived) addFact("Coordinates", `${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-    addFact("Wikidata", `Q${item.qid}`);
+    const wikidata = site.wikidataOf(item);
+    if (wikidata) addFact("Wikidata", `Q${wikidata}`);
 
     const links = document.createElement("div");
     links.className = "links";
@@ -293,11 +351,11 @@ export class DetailPanel {
     if (item.wiki) {
       const lang = item.wikiLang || "en";
       addLink(
-        lang === "en" ? "Wikipedia" : `Wikipedia (${lang})`,
-        articleUrl(lang, item.wiki)
+        site.articleLabel(lang),
+        articleUrl(site, lang, item.wiki) + site.articleAnchor(item)
       );
     }
-    addLink("Wikidata", `https://www.wikidata.org/wiki/Q${item.qid}`);
+    if (wikidata) addLink("Wikidata", `https://www.wikidata.org/wiki/Q${wikidata}`);
     // No map links for a borrowed, nudged coordinate: they would open a pin on
     // a spot that exists only because this map had to draw the dot somewhere.
     if (!item.derived) {
@@ -305,11 +363,13 @@ export class DetailPanel {
       addLink("Google Maps", `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`);
     }
 
-    this.body.append(title, meta, figure, extract, facts, links);
+    this.body.append(title, meta, figure, extract);
+    if (chart) this.body.append(chart);
+    this.body.append(facts, links);
     this.panel.classList.add("open");
 
-    if (!item.wiki) return;
-    fetch(summaryUrl(item.wikiLang, item.wiki), { signal })
+    if (!fetchSummary) return;
+    fetch(summaryUrl(site, item.wikiLang, item.wiki), { signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data) return;

@@ -173,13 +173,33 @@ def main() -> None:
         f"(score >= {args.min_score}, {100 * len(df) / named:.1f}%)"
     )
 
+    df = df.with_columns(
+        pl.col("country_label")
+        .replace_strict(country_id, default=-1, return_dtype=pl.Int64)
+        .alias("country_id")
+    )
+    write_search(df, config.DATA_DIR, args.min_score, args.cap, args.part_bytes)
+    print(f"  {(time.perf_counter() - started) / 60:.1f} min")
+
+
+def write_search(
+    df: pl.DataFrame, out_dir, min_score: float, cap: int, part_bytes: int
+) -> None:
+    """Shard, pack and write the index for rows already filtered and sorted.
+
+    `df` needs name, lon, lat, qid, score, cat and country_id (-1 for none),
+    and may have `where`, a string appended to the entry when it is set.
+    Shared with the travel map, whose rows come from a different table.
+    """
     names = df["name"].to_list()
     lons = df["lon"].to_list()
     lats = df["lat"].to_list()
     qids = df["qid"].to_list()
     scores = df["score"].to_list()
     cats = df["cat"].to_list()
-    country_labels = df["country_label"].to_list()
+    country_ids = df["country_id"].to_list()
+    # Optional: a place name the result row shows instead of the country.
+    wheres = df["where"].to_list() if "where" in df.columns else None
     del df
 
     shards: dict[str, list] = defaultdict(list)
@@ -195,8 +215,10 @@ def main() -> None:
             qids[i],
             round(scores[i], 4),
             cats[i],
-            country_id.get(country_labels[i], -1),
+            country_ids[i],
         ]
+        if wheres is not None and wheres[i]:
+            entry.append(wheres[i])
         keys = [norm]
         keys.extend(norm.split()[1:MAX_WORDS])
         for key in keys:
@@ -215,9 +237,9 @@ def main() -> None:
     truncated = 0
     for prefix, entries in shards.items():
         entries.sort(key=lambda e: -e[4])
-        if len(entries) > args.cap:
+        if len(entries) > cap:
             truncated += 1
-            del entries[args.cap :]
+            del entries[cap :]
         for level in (1, 2):
             if len(prefix) > level:
                 short[level][prefix[:level]].extend(entries[:TOP_PER_SHORT_SHARD])
@@ -240,7 +262,7 @@ def main() -> None:
             shards[prefix] = deduped
     del short
 
-    print(f"  {len(shards):,} shards, {truncated:,} hit the {args.cap}-entry cap")
+    print(f"  {len(shards):,} shards, {truncated:,} hit the {cap}-entry cap")
 
     # Group by first character so a query needs one small directory, not all of
     # them. Scripts with only a handful of prefixes share one chunk.
@@ -262,7 +284,6 @@ def main() -> None:
         letters[RARE] = rare
     print(f"  {len(letters):,} directory chunks ({len(rare):,} prefixes in the shared one)")
 
-    out_dir = config.DATA_DIR
     if (out_dir / "search").exists():
         print("removing the old data/search tree")
         shutil.rmtree(out_dir / "search")
@@ -272,7 +293,7 @@ def main() -> None:
 
     root: dict[str, list] = {}
     total_entries = 0
-    with PackWriter(out_dir, "search", args.part_bytes) as pack:
+    with PackWriter(out_dir, "search", part_bytes) as pack:
         for letter, prefixes in sorted(letters.items()):
             base = pack.total
             lengths = []
@@ -304,8 +325,8 @@ def main() -> None:
                 "levels": [1, 2, 3],
                 "entries": total_entries,
                 "items": len(names),
-                "minScore": args.min_score,
-                "cap": args.cap,
+                "minScore": min_score,
+                "cap": cap,
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -319,7 +340,6 @@ def main() -> None:
         f"{pack_info['bytes'] / 1e6:.0f} MB in {len(pack_info['parts'])} part(s)"
     )
     print(f"  root file {root_bytes / 1024:.0f} KiB")
-    print(f"  {(time.perf_counter() - started) / 60:.1f} min")
 
 
 if __name__ == "__main__":

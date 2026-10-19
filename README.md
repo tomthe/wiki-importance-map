@@ -14,6 +14,13 @@ museum, battles where they were fought, companies at their headquarters, ships
 at their home port, novels where they are set. They
 are drawn as hollow dots and spread around their birthplace/city.
 
+**And a second map, for travel:** https://tomthe.github.io/wiki-importance-map/voyage/
+— every [Wikivoyage](https://www.wikivoyage.org/) destination and the guides'
+See / Do / Buy / Eat / Drink / Sleep / Go listings, sized by nothing but how
+often travellers read about them, *month by month*. Pick February and the ski
+resorts grow; pick August and the coast does. See
+[The travel map](#the-travel-map) below.
+
 ## Why?
 
 I wanted to get a better feeling for several of my favorite datasets!
@@ -413,14 +420,20 @@ The payload is columnar, little-endian, gzipped, with every numeric array on a
 0   "WMT2", uint16 version, uint16 z
 8   uint32 x, uint32 y, uint32 count
 20  uint32 titleBytes, wikiBytes, descrBytes
-32  uint32 adminCount, adminBytes, reserved, reserved
+32  uint32 adminCount, adminBytes, extraCount k, reserved
 48  qid u32[n], titleOff u32[n+1], wikiOff u32[n+1], descrOff u32[n+1],
     lon f32[n], lat f32[n], population u32[n],
     score u16[n], pr u16[n], qr u16[n], country u16[n], admin u16[n],
     elevation i16[n], year i16[n],                              (pad to 4)
     cat u8[n], sub u8[n], flags u8[n], sitelinks u8[n],
+    extras u8[k][n],                                            (pad to 4)
     adminOff u32[adminCount+1], adminBlob, titles, wikis, descrs
 ```
+
+`extras` is k optional byte columns, column by column. This map writes k = 0,
+which is byte-for-byte the format as it was; the travel map writes twelve
+monthly shares and a guide status (k = 13), and the decoder hands them over as
+`item.extra` without knowing what they mean.
 
 `wiki` holds `lang|title` — the article to link to, preferring English. The
 title part is left empty when it equals the drawn label, which is the common
@@ -582,9 +595,11 @@ python -m tests.test_tile_format    # Python encoder -> JS decoder round trip
 python -m tests.test_packfile       # pack offsets, indexes, range coalescing
 python -m tests.test_build_master   # the join's SQL, on synthetic shards
 python -m tests.test_spread         # the phyllotaxis spread's invariants
+python -m tests.test_voyage_wikitext  # travel map: listings out of wikitext
+node tests/season_check.mjs          # travel map: monthly importance in the browser
 ```
 
-All four run in seconds and need no dumps. The first two exist because the
+All of them run in seconds and need no dumps. The first two exist because the
 same arithmetic is written twice, in two languages: an off-by-one in an offset
 does not fail loudly, it hands the decoder somebody else's bytes.
 
@@ -1034,6 +1049,98 @@ capped at 20,000 files back when there were 183,437 of them too.
 
 `index.html` still pulls MapLibre and deck.gl from unpkg. Vendor both if you
 care about a third party's outage being your white screen.
+
+## The travel map
+
+`voyage/index.html`, built by `pipeline/voyage/`. It is the same site — same
+tile format, packs, search, label placement and panels — pointed at a different
+table: `<html data-site="voyage">` makes `src/site.js` answer the handful of
+questions that differ (where an article lives, what the importance number
+means, which categories start off), and `data/` resolves to `voyage/data/`.
+
+```sh
+python -m pipeline.voyage.run_all          # ~25 min, most of it pageviews
+python -m pipeline.voyage.run_all --list
+```
+
+It reads the Wikipedia map's `sitelinks`, `truthy` and `articles.parquet` for
+Wikidata ids, coordinates, countries and populations, so those have to exist.
+Its own inputs go in `WIKIVOYAGE_DUMPS` (default `G:\tt\wikivoyage`):
+
+| Input | Size | Source |
+|---|---|---|
+| `pageviews/pageviews-YYYYMM-user.bz2`, Nov 2022 – Oct 2024 | 24 × ~4 GB | `dumps.wikimedia.org/other/pageview_complete/monthly/` |
+| `xml/<lang>wikivoyage-<date>-pages-articles.xml.bz2`, all 27 editions | 440 MB | `dumps.wikimedia.org/<lang>wikivoyage/` or a mirror |
+
+### What is on it
+
+464,174 points in 4,815 tiles, 43 MB, plus a 21 MB search index:
+
+* **59,100 destinations** — every Wikidata item with a Wikivoyage article in any
+  of the 27 editions and a coordinate (Wikidata's P625, else the article's own
+  `{{geo}}`). 12,815 more have no coordinate anywhere and are left off, and so
+  are the 214 phrasebooks, which Wikidata places wherever their language is.
+* **405,074 listings** from the English and German guides — the two that have
+  them in quantity. Each has its own lat/long or a Wikidata item with one;
+  220,486 more have neither and are left off. The same place listed twice
+  — in English and German, or in a city and its district article — is merged
+  by Wikidata item, then by a name match within 300 m.
+
+Nine categories, which is exactly the nine-colour ceiling the main map
+measured: the guide's own seven sections, Destination, and Practical (tourist
+offices, pharmacies, embassies). The hues are a subset of the main map's
+validated palette. Subcategories come from German vCard `type=`, the Wikipedia
+map's class for a listing's Wikidata item, or a keyword in its name.
+
+### Importance is pageviews, and only pageviews
+
+```
+V    = views in a year, every edition, redirects folded into their targets
+s    = log10(1 + V) / log10(1 + V_max)              the year
+s_m  = log10(1 + 12 · views in month m) / same       month m, annualised
+```
+
+A place as busy in March as in an average month scores the same in March as
+for the year. The tile stores `s` and twelve bytes of monthly share (relative
+to the item's busiest month) in the new *extras* block — see the tile format
+below — and the browser rebuilds `s_m` for whichever month is picked. The
+**Most viewed ↔ In season** slider adds `0.1 · log2(12 · share_m)` scaled by
+its position: how many doublings this month is above the item's own average.
+Left, February shows where people read about in February — London, as every
+month. Right, it shows what is *in season* in February.
+
+The pyramid is built on each item's **peak month**, not its year, so a place
+that matters in one season is still in the shallow tiles when that season is
+picked.
+
+**A listing has no pageviews.** Nobody links to one and it has no page, so it
+borrows its guide's: the article's score less a penalty — 0.12, plus up to 0.10
+by section (See least, Practical most), plus 0.004 per listing above it in its
+section, less a little for having a Wikidata item, a Wikipedia article or an
+image. It is a ranking within a guide and nothing more, and the UI says so: a
+listing's hover says how busy *its guide* is, not that anyone looked at it.
+
+### Why the pageviews are from 2022–24
+
+The obvious choice was the latest twelve months, and they are unusable. From
+November 2024 the `user` class of English Wikivoyage traffic — the one that is
+supposed to be people — went from about 5M views a month to 15–30M, and the
+excess is crawlers the automated-traffic filter does not catch. It is not a
+spike a cap could remove: it lasts months, lands on every article at once, and
+is seasonal itself, so in the 2025–26 data Rovaniemi "peaks" in September, and
+so do Zermatt and Courchevel. Both desktop and mobile-web are affected.
+
+So the map uses the 24 months before it. Each calendar month is seen twice and
+the two are combined by their **minimum**: bots add views, they never remove
+them, and they rarely hit the same article in the same month two years
+running, whereas a real season comes back. Within a month, every day is capped
+at three times that month's median day first, so one day of a script hammering
+a page counts as one ordinary day.
+
+That gives Rovaniemi a December peak, Mykonos May–August, Niseko and Goa
+December–January, and Oktoberfest a September that is four times its average
+month. Small articles are still noisy — a destination with 150 views a year
+has about a dozen a month, and that is what the median destination has.
 
 ## Known limits
 

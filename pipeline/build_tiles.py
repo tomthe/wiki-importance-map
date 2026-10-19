@@ -33,7 +33,7 @@ browser can hand the arrays straight to deck.gl without touching each row:
   offset 0   magic "WMT2", uint16 version, uint16 z
          8   uint32 x, uint32 y, uint32 count
         20   uint32 titleBytes, wikiBytes, descrBytes
-        32   uint32 adminCount, adminBytes, reserved, reserved
+        32   uint32 adminCount, adminBytes, extraCount k, reserved
         48   qid Uint32[n], titleOff Uint32[n+1], wikiOff Uint32[n+1],
              descrOff Uint32[n+1], lon Float32[n], lat Float32[n],
              population Uint32[n],
@@ -41,6 +41,7 @@ browser can hand the arrays straight to deck.gl without touching each row:
              country Uint16[n], admin Uint16[n],
              elevation Int16[n], year Int16[n],                  (pad to 4)
              cat Uint8[n], sub Uint8[n], flags Uint8[n], sitelinks Uint8[n],
+             extras Uint8[k][n],                                 (pad to 4)
              adminOff Uint32[adminCount+1], adminBlob UTF-8,
              titles UTF-8, wikis UTF-8, descrs UTF-8
 
@@ -304,6 +305,11 @@ def _blob(strings: list[str]) -> tuple[bytes, np.ndarray]:
 
 def encode_tile(rows: dict, z: int, x: int, y: int) -> bytes:
     n = len(rows["qid"])
+    # Optional extra byte columns, shape (k, n). The travel map stores twelve
+    # monthly shares and a guide status there; this map stores none, and k=0
+    # writes exactly the bytes the format always had.
+    extras = rows.get("extras")
+    k = 0 if extras is None else int(extras.shape[0])
 
     title_blob, title_off = _blob(rows["title"])
     wiki_blob, wiki_off = _blob(rows["wiki"])
@@ -334,7 +340,7 @@ def encode_tile(rows: dict, z: int, x: int, y: int) -> bytes:
             x, y, n,
             len(title_blob), len(wiki_blob), len(descr_blob),
             len(admin_names), len(admin_blob),
-            0, 0,
+            k, 0,
         )
     ]
     parts.append(rows["qid"].astype("<u4").tobytes())
@@ -358,6 +364,12 @@ def encode_tile(rows: dict, z: int, x: int, y: int) -> bytes:
     parts.append(rows["sub"].astype("u1").tobytes())
     parts.append(rows["flags"].astype("u1").tobytes())
     parts.append(rows["sitelinks"].astype("u1").tobytes())
+    if k:
+        # Column by column, so each month is a run of similar bytes for gzip.
+        parts.append(np.ascontiguousarray(extras, dtype="u1").tobytes())
+        pad = (-k * n) % 4
+        if pad:
+            parts.append(b"\0" * pad)
     parts.append(admin_off.astype("<u4").tobytes())
     parts.append(admin_blob)
     parts.append(title_blob)
@@ -383,7 +395,7 @@ STRING_COLUMNS = ("title", "wiki", "descr", "admin")
 _FIELD_OF = {"score_u16": "score"}
 
 
-def tile_jobs(part: pl.DataFrame, z: int):
+def tile_jobs(part: pl.DataFrame, z: int, extra_columns: tuple[str, ...] = ()):
     """Split one zoom, already sorted by (tx, ty), into per-tile job tuples.
 
     Slicing pre-extracted arrays beats iterating polars groups: there are up to
@@ -395,6 +407,11 @@ def tile_jobs(part: pl.DataFrame, z: int):
     keys = (tx.astype(np.uint32) << 16) | ty.astype(np.uint32)
     arrays = {name: part[name].to_numpy() for name in NUMERIC_COLUMNS}
     lists = {name: part[name].to_list() for name in STRING_COLUMNS}
+    extras = (
+        np.stack([part[c].to_numpy().astype(np.uint8) for c in extra_columns])
+        if extra_columns
+        else None
+    )
 
     edges = np.flatnonzero(np.diff(keys)) + 1
     starts = np.concatenate(([0], edges))
@@ -402,6 +419,8 @@ def tile_jobs(part: pl.DataFrame, z: int):
     for start, stop in zip(starts.tolist(), stops.tolist()):
         rows = {_FIELD_OF.get(k, k): arrays[k][start:stop] for k in NUMERIC_COLUMNS}
         rows.update({k: lists[k][start:stop] for k in STRING_COLUMNS})
+        if extras is not None:
+            rows["extras"] = extras[:, start:stop]
         yield (
             int(keys[start]),
             z,
@@ -421,6 +440,63 @@ def zoom_index(keys: list[int], lengths: list[int]) -> bytes:
     head = np.array([len(keys)], dtype="<u4").tobytes()
     body = np.array(keys, dtype="<u4").tobytes() + np.array(lengths, dtype="<u4").tobytes()
     return gzip.compress(head + body, 6, mtime=0)
+
+
+def write_pyramid(
+    df: pl.DataFrame,
+    out_dir: Path,
+    max_zoom: int,
+    part_bytes: int,
+    workers: int,
+    extra_columns: tuple[str, ...] = (),
+) -> tuple[dict, int, dict]:
+    """Encode every tile and pack them, zoom by zoom.
+
+    `df` has one row per item with its zoom and tile (z, tx, ty), the columns
+    in NUMERIC_COLUMNS and STRING_COLUMNS, and any `extra_columns` of bytes.
+    Returns the per-zoom manifest entries, the tile count and the pack info.
+    Shared with the travel map, which is the same pyramid over other data.
+    """
+    gone = remove_parts(out_dir, "tiles")
+    if gone:
+        print(f"removed {gone} pack part(s) from the previous build")
+
+    print("encoding and packing")
+    zoom_meta: dict[str, dict] = {}
+    tile_count = 0
+    with PackWriter(out_dir, "tiles", part_bytes) as pack, ProcessPoolExecutor(
+        max_workers=workers
+    ) as pool:
+        for z in range(max_zoom + 1):
+            part = df.filter(pl.col("z") == z)
+            if part.is_empty():
+                continue
+            part = part.sort(["tx", "ty"])
+            base = pack.total
+            keys: list[int] = []
+            lengths: list[int] = []
+            for key, blob in pool.map(
+                _encode_and_gzip, tile_jobs(part, z, extra_columns), chunksize=32
+            ):
+                keys.append(key)
+                lengths.append(len(blob))
+                pack.add(blob)
+            tile_count += len(keys)
+            zoom_bytes = sum(lengths)
+            index_offset, index_length = pack.add(zoom_index(keys, lengths))
+            zoom_meta[str(z)] = {
+                "tiles": len(keys),
+                "base": base,
+                "bytes": zoom_bytes,
+                "index": [index_offset, index_length],
+            }
+            print(
+                f"  z={z:2d}  {len(keys):7,d} tiles  {zoom_bytes / 1e6:7.1f} MB  "
+                f"index {index_length / 1024:6.1f} KiB"
+            )
+        pack.close()
+        pack_info = pack.info()
+    return zoom_meta, tile_count, pack_info
 
 
 def main() -> None:
@@ -624,45 +700,9 @@ def main() -> None:
         if stale.exists():
             print(f"removing the old {stale} layout")
             shutil.rmtree(stale)
-    gone = remove_parts(out_dir, "tiles")
-    if gone:
-        print(f"removed {gone} pack part(s) from the previous build")
-
-    print("encoding and packing")
-    zoom_meta: dict[str, dict] = {}
-    tile_count = 0
-    with PackWriter(out_dir, "tiles", args.part_bytes) as pack, ProcessPoolExecutor(
-        max_workers=args.workers
-    ) as pool:
-        for z in range(args.max_zoom + 1):
-            part = df.filter(pl.col("z") == z)
-            if part.is_empty():
-                continue
-            part = part.sort(["tx", "ty"])
-            base = pack.total
-            keys: list[int] = []
-            lengths: list[int] = []
-            for key, blob in pool.map(
-                _encode_and_gzip, tile_jobs(part, z), chunksize=32
-            ):
-                keys.append(key)
-                lengths.append(len(blob))
-                pack.add(blob)
-            tile_count += len(keys)
-            zoom_bytes = sum(lengths)
-            index_offset, index_length = pack.add(zoom_index(keys, lengths))
-            zoom_meta[str(z)] = {
-                "tiles": len(keys),
-                "base": base,
-                "bytes": zoom_bytes,
-                "index": [index_offset, index_length],
-            }
-            print(
-                f"  z={z:2d}  {len(keys):7,d} tiles  {zoom_bytes / 1e6:7.1f} MB  "
-                f"index {index_length / 1024:6.1f} KiB"
-            )
-        pack.close()
-        pack_info = pack.info()
+    zoom_meta, tile_count, pack_info = write_pyramid(
+        df, out_dir, args.max_zoom, args.part_bytes, args.workers
+    )
 
     subs = subcategory_names()
     manifest = {

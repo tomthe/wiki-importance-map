@@ -43,6 +43,7 @@ console.log(
       score: Math.round(i.score * 1000) / 1000,
       pr: Math.round(i.pr * 1000) / 1000,
       qr: Math.round(i.qr * 1000) / 1000,
+      extra: i.extra ?? null,
     })),
   })
 );

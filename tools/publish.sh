@@ -34,7 +34,7 @@ fi
 # parts at 90 MiB, but a hand-run with --part-bytes would sail past it and the
 # rejection comes only after uploading everything.
 limit=$((100 * 1024 * 1024))
-for f in data/*; do
+for f in data/* voyage/data/*; do
     size=$(wc -c <"$f")
     if [ "$size" -ge "$limit" ]; then
         echo "$f is $size bytes, over GitHub's 100 MiB single-file limit" >&2
@@ -46,14 +46,14 @@ index="$root/$(git rev-parse --git-dir)/publish.idx"
 rm -f "$index"
 
 # -f because data/ is ignored on master, which is the point.
-GIT_INDEX_FILE="$index" git add -f .nojekyll index.html src data
+GIT_INDEX_FILE="$index" git add -f .nojekyll index.html src data voyage
 tree=$(GIT_INDEX_FILE="$index" git write-tree)
 rm -f "$index"
 
 # No -p: an orphan commit. The previous gh-pages tip becomes unreachable.
 commit=$(git commit-tree "$tree" -m "publish $(date +%F)")
 
-bytes=$(du -sk data | cut -f1)
+bytes=$(du -sk data voyage/data | awk '{s += $1} END {print s}')
 echo "commit $commit  tree $tree  (${bytes} KiB of data)"
 
 if [ -n "$dry" ]; then

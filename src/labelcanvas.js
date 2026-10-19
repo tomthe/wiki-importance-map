@@ -97,7 +97,7 @@ export class LabelCanvas {
       dpr,
       theme,
       style.colorByCategory,
-      style.qrankWeight,
+      style.seasonKey,
       style.populationWeight,
       style.labelScale,
       canvasLabelTuning.halo,

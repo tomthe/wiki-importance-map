@@ -16,16 +16,14 @@ import { Search } from "./search.js";
 import { Tooltip, DetailPanel } from "./ui.js";
 import { Pack } from "./pack.js";
 import { basemapStyle } from "./basemap.js";
+import { siteFor } from "./site.js";
 
+// Relative to the page, so voyage/index.html reads voyage/data/ with the same
+// code. Which map this is - and so what the importance number means, where
+// articles live and which categories start off - comes from <html data-site>.
 const DATA_URL = "data";
-// Settlements and Administrative are the two categories the importance score
-// already favours - they dominate every zoom and mostly restate what the
-// basemap says. Starting with them off makes the first view show the things
-// people came for, and both are one click away.
-//
-// People deliberately starts off. It is the layer this map did not have, and
-// unlike Settlements it duplicates nothing underneath it.
-const DEFAULT_OFF = ["Settlements", "Administrative", "People"];
+const SITE_NAME = document.documentElement.dataset.site || "wikipedia";
+let site;
 
 const $ = (id) => document.getElementById(id);
 
@@ -68,6 +66,15 @@ const state = {
   viewState: { longitude: 8, latitude: 47, zoom: 3.4, pitch: 0, bearing: 0 },
   style: {
     qrankWeight: 0.5,
+    // The travel map's two: which month (0 for the whole year), and how much
+    // being *in season* counts against being popular in absolute terms.
+    month: 0,
+    seasonWeight: 0.5,
+    // Everything the importance of an item depends on, as one string. Caches of
+    // label sizes and atlases key on it, so it has to change whenever any of
+    // the above does - refreshImportance() is the only writer.
+    seasonKey: "",
+    importance: null,
     populationWeight: 0,
     labelScale: 1.3,
     // Not a minimum. Lowering it hides the loudest items, which is the only
@@ -101,11 +108,18 @@ let detail;
 let manifest;
 let scheduled = null;
 
+function refreshImportance() {
+  const { qrankWeight, month, seasonWeight } = state.style;
+  state.style.seasonKey = site?.hasSeasons
+    ? `${month}|${seasonWeight}`
+    : `${qrankWeight}`;
+}
+
 // ---------------------------------------------------------------- view state
 
 // The hash is `#zoom/lat/lon`, optionally followed by `/key=value` segments -
-// today only `cat=`, the category selection (see src/categories.js for its
-// grammar). Splitting on `/` and sorting segments into "number" and "key=value"
+// `cat=`, the category selection (see src/categories.js for its grammar), and
+// on the travel map `m=`, the month. Splitting on `/` and sorting segments into "number" and "key=value"
 // means an old three-part link still works and an unknown key is ignored rather
 // than throwing the view away.
 function readHash() {
@@ -132,9 +146,11 @@ function readHash() {
 function hashFor() {
   const { zoom, latitude, longitude } = state.viewState;
   const cats = filter?.urlValue();
+  const month = site?.hasSeasons ? state.style.month : 0;
   return (
     `#${zoom.toFixed(2)}/${latitude.toFixed(4)}/${longitude.toFixed(4)}` +
-    (cats ? `/cat=${cats}` : "")
+    (cats ? `/cat=${cats}` : "") +
+    (month ? `/m=${month}` : "")
   );
 }
 
@@ -156,6 +172,7 @@ function onHashChange() {
   if (location.hash === ownHash) return;
   const link = readHash();
   filter.apply(link.cat ?? filter.defaultEncoded);
+  if (site.hasSeasons) setMonth(parseMonth(link.m), { quiet: true });
   if (link.view) state.viewState = { ...state.viewState, ...link.view };
   render({ reselect: true });
   scheduleTiles();
@@ -199,7 +216,7 @@ function chooseLabels(items) {
   labelled = selectLabels({
     items,
     viewport: currentViewport(),
-    importance: (item) => importanceOf(item, state.style.qrankWeight),
+    importance: (item) => importanceOf(item, state.style),
     sizeOf: (item) => labelSize(item, state.style),
     budget: state.style.labelBudget,
     avoid: panelRects(),
@@ -220,10 +237,10 @@ function scheduleLabels(items) {
  *  ceiling. One list, used for the dots, the labels and the counts, so the
  *  three can never disagree about what is on the map. */
 function visibleItems() {
-  const { qrankWeight, maxImportance } = state.style;
+  const { maxImportance } = state.style;
   const items = tiles.visibleItems().filter((item) => filter.accept(item));
   if (maxImportance >= 1) return items;
-  return items.filter((item) => importanceOf(item, qrankWeight) <= maxImportance);
+  return items.filter((item) => importanceOf(item, state.style) <= maxImportance);
 }
 
 function render({ reselect = false } = {}) {
@@ -272,7 +289,7 @@ function updateStatus(inView, labelCount, displaced) {
   const busy = s.pending + s.queued > 0;
   $("status").classList.toggle("busy", busy);
   $("status-text").textContent =
-    `${labelCount.toLocaleString()} labels of ${inView.toLocaleString()} places · ` +
+    `${labelCount.toLocaleString()} labels of ${inView.toLocaleString()} ${site.thingsName} · ` +
     (displaced ? `${displaced} moved aside · ` : "") +
     `${s.needed} tiles in view · ${s.cached.toLocaleString()} cached · ` +
     `${s.megabytes.toFixed(1)} MB in ${s.requests.toLocaleString()} requests` +
@@ -402,6 +419,8 @@ function wireControls() {
 
   const slider = (id, apply) => {
     const el = $(id);
+    // Each page carries only the sliders that mean something on its map.
+    if (!el) return;
     el.addEventListener("input", () => {
       apply(Number(el.value));
       render({ reselect: true });
@@ -411,9 +430,20 @@ function wireControls() {
   slider("weight", (raw) => {
     const v = raw / 100;
     state.style.qrankWeight = v;
+    refreshImportance();
     $("weight-out").textContent =
       v < 0.35 ? "link structure" : v > 0.65 ? "pageviews" : "balanced";
   });
+
+  slider("season", (raw) => {
+    const v = raw / 100;
+    state.style.seasonWeight = v;
+    refreshImportance();
+    $("season-out").textContent =
+      v < 0.2 ? "most viewed" : v > 0.8 ? "in season" : "balanced";
+  });
+
+  if (site.hasSeasons) wireMonths();
 
   slider("population", (raw) => {
     const v = raw / 100;
@@ -478,10 +508,62 @@ function wireControls() {
   }
 }
 
+// ------------------------------------------------------------------- months
+
+/** "3" -> 3; anything that is not a month -> 0, the whole year. */
+function parseMonth(raw) {
+  const m = Number(raw);
+  return Number.isInteger(m) && m >= 1 && m <= 12 ? m : 0;
+}
+
+/** The month row on the travel map: the year, then January to December. */
+function wireMonths() {
+  const row = $("months");
+  const labels = ["Year", ...site.months];
+  labels.forEach((label, month) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "month";
+    button.textContent = month ? label.charAt(0) : label;
+    button.title = month ? label : "The whole year";
+    button.dataset.month = String(month);
+    button.addEventListener("click", () => setMonth(month));
+    row.append(button);
+  });
+  // The arrow keys step through the months once the row has focus, which is
+  // the quickest way to watch a season move across the map.
+  row.addEventListener("keydown", (event) => {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    setMonth((state.style.month + step + 13) % 13);
+    row.querySelector(`[data-month="${state.style.month}"]`)?.focus();
+  });
+}
+
+function setMonth(month, { quiet = false } = {}) {
+  state.style.month = month;
+  refreshImportance();
+  for (const button of document.querySelectorAll("#months .month")) {
+    const on = Number(button.dataset.month) === month;
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-pressed", String(on));
+  }
+  const out = $("month-out");
+  if (out) out.textContent = month ? site.monthsLong[month - 1] : "the whole year";
+  // "In season" means nothing without a season to be in.
+  const season = $("season");
+  if (season) season.disabled = !month;
+  if (quiet) return;
+  render({ reselect: true });
+  writeHash();
+}
+
 /** Move a slider as if it had been dragged, so the value, the state and the
  *  readout beside it cannot disagree. */
 function setSlider(id, value) {
   const el = $(id);
+  if (!el) return;
   el.value = String(value);
   el.dispatchEvent(new Event("input"));
 }
@@ -507,9 +589,7 @@ function startSearch() {
         onPick: ({ lon, lat }) => flyTo(lon, lat, Math.max(state.viewState.zoom, 11)),
       });
       $("search").placeholder = "Search places…";
-      $("search-note").textContent =
-        `${root.items.toLocaleString()} places above importance ` +
-        `${(root.minScore * 100).toFixed(0)} are findable`;
+      $("search-note").textContent = site.searchNote(root);
     })
     .catch(() => {
       $("search").placeholder = "search index not built";
@@ -535,13 +615,16 @@ async function start() {
 
   state.style.palette = manifest.palette[state.theme];
   document.documentElement.dataset.theme = state.theme;
+  site = siteFor(SITE_NAME, manifest);
+  state.style.importance = site.importance;
+  refreshImportance();
 
   const link = readHash();
 
   filter = new CategoryFilter({
     manifest,
     container: $("categories"),
-    defaultOff: DEFAULT_OFF,
+    defaultOff: site.defaultOff,
     // The selection is in the URL, so every change to it rewrites the hash -
     // that is the whole of "share what I can see".
     onChange: () => {
@@ -605,6 +688,8 @@ async function start() {
 
   tooltip = new Tooltip($("tooltip"), {
     categories: manifest,
+    site,
+    style: state.style,
     // The tap that turns the popup into the article. Mouse users never reach
     // this: the tooltip does not take the pointer unless it is in touch mode.
     onActivate: (item) => openDetail(item),
@@ -614,15 +699,15 @@ async function start() {
     body: $("detail-body"),
     closeButton: $("detail-close"),
     categories: manifest,
+    site,
+    style: state.style,
   });
 
   wireControls();
+  if (site.hasSeasons) setMonth(parseMonth(link.m), { quiet: true });
   startSearch();
 
-  $("data-note").textContent =
-    `${manifest.itemCount.toLocaleString()} geolocated articles in ` +
-    `${manifest.tileCount.toLocaleString()} tiles · zoom 0–${manifest.maxZoom} · ` +
-    `${(manifest.pack.bytes / 1e6).toFixed(0)} MB in ${manifest.pack.parts.length} file(s)`;
+  $("data-note").textContent = site.dataNote(manifest);
 
   window.addEventListener("resize", onResize);
   window.addEventListener("hashchange", onHashChange);

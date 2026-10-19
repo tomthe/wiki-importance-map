@@ -126,7 +126,7 @@ const bucketFor = (size) => BUCKETS.findIndex((bucket) => size <= bucket.maxPx);
 let splitCache = { labelled: null, key: null, groups: null };
 
 function splitBySize(labelled, style) {
-  const key = `${style.qrankWeight} ${style.populationWeight} ${style.labelScale}`;
+  const key = `${style.seasonKey} ${style.populationWeight} ${style.labelScale}`;
   if (splitCache.labelled === labelled && splitCache.key === key) {
     return splitCache.groups;
   }
@@ -138,9 +138,11 @@ function splitBySize(labelled, style) {
   return groups;
 }
 
-/** Mix the two importance signals the way the slider asks for. */
-export function importanceOf(item, qrankWeight) {
-  return item.pr * (1 - qrankWeight) + item.qr * qrankWeight;
+/** The importance the sliders currently ask for. What that means is the
+ *  site's business (src/site.js): a mix of PageRank and pageviews on the
+ *  Wikipedia map, one month's pageviews on the travel map. */
+export function importanceOf(item, style) {
+  return style.importance(item, style);
 }
 
 /**
@@ -151,8 +153,9 @@ export function importanceOf(item, qrankWeight) {
  * items have one, so it is blended in rather than substituted: items with no
  * population keep their importance and stay comparable.
  */
-export function weightOf(item, qrankWeight, populationWeight) {
-  const importance = importanceOf(item, qrankWeight);
+export function weightOf(item, style) {
+  const importance = importanceOf(item, style);
+  const { populationWeight } = style;
   if (!populationWeight || item.pop == null) return importance;
   const scaled = Math.max(
     0,
@@ -164,7 +167,7 @@ export function weightOf(item, qrankWeight, populationWeight) {
 /** Label pixel size. Shared with the declutter pass so the boxes it reserves
  *  match what actually gets drawn. */
 export function labelSize(item, style) {
-  const weight = weightOf(item, style.qrankWeight, style.populationWeight);
+  const weight = weightOf(item, style);
   return (10 + 30 * weight * weight) * style.labelScale;
 }
 
@@ -181,11 +184,11 @@ export function buildLayers({ items, labelled, style, theme, textLayers = true }
   const halo = HALO[theme] ?? HALO.light;
   const leader = theme === "dark" ? [140, 140, 136, 150] : [110, 110, 105, 140];
   const dotAlpha = theme === "dark" ? 190 : 165;
-  const { qrankWeight, labelScale, populationWeight, colorByCategory, labelBudget } =
+  const { seasonKey, labelScale, populationWeight, colorByCategory, labelBudget } =
     style;
 
   const triggers = {
-    qrankWeight,
+    seasonKey,
     labelScale,
     populationWeight,
     colorByCategory,
@@ -210,7 +213,7 @@ export function buildLayers({ items, labelled, style, theme, textLayers = true }
     radiusMaxPixels: 9,
     getPosition: (d) => d.position,
     getRadius: (d) =>
-      1.4 + 7 * Math.pow(weightOf(d, qrankWeight, populationWeight), 1.6),
+      1.4 + 7 * Math.pow(weightOf(d, style), 1.6),
     getFillColor: (d) => (d.derived ? [0, 0, 0, 0] : [...colors[d.cat], dotAlpha]),
     getLineColor: (d) => [...colors[d.cat], d.derived ? dotAlpha : 0],
     getLineWidth: (d) => (d.derived ? 1.2 : 0),
