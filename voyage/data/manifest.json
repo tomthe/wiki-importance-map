@@ -1,0 +1,592 @@
+{
+  "version": 2,
+  "format": "WMT2",
+  "site": "voyage",
+  "maxZoom": 13,
+  "capacity": 200,
+  "tileCount": 4815,
+  "itemCount": 464174,
+  "destinationCount": 59100,
+  "totalBytes": 43321663,
+  "pack": {
+    "stem": "tiles",
+    "parts": [
+      43321663
+    ],
+    "bytes": 43321663
+  },
+  "zooms": {
+    "0": {
+      "tiles": 1,
+      "base": 0,
+      "bytes": 29375,
+      "index": [
+        29375,
+        27
+      ]
+    },
+    "1": {
+      "tiles": 4,
+      "base": 29402,
+      "bytes": 110775,
+      "index": [
+        140177,
+        43
+      ]
+    },
+    "2": {
+      "tiles": 16,
+      "base": 140220,
+      "bytes": 276825,
+      "index": [
+        417045,
+        107
+      ]
+    },
+    "3": {
+      "tiles": 35,
+      "base": 417152,
+      "bytes": 676742,
+      "index": [
+        1093894,
+        211
+      ]
+    },
+    "4": {
+      "tiles": 93,
+      "base": 1094105,
+      "bytes": 1690446,
+      "index": [
+        2784551,
+        484
+      ]
+    },
+    "5": {
+      "tiles": 221,
+      "base": 2785035,
+      "bytes": 3630001,
+      "index": [
+        6415036,
+        1097
+      ]
+    },
+    "6": {
+      "tiles": 474,
+      "base": 6416133,
+      "bytes": 6373435,
+      "index": [
+        12789568,
+        2282
+      ]
+    },
+    "7": {
+      "tiles": 824,
+      "base": 12791850,
+      "bytes": 9523107,
+      "index": [
+        22314957,
+        3983
+      ]
+    },
+    "8": {
+      "tiles": 1144,
+      "base": 22318940,
+      "bytes": 9611845,
+      "index": [
+        31930785,
+        5578
+      ]
+    },
+    "9": {
+      "tiles": 1010,
+      "base": 31936363,
+      "bytes": 7272672,
+      "index": [
+        39209035,
+        4832
+      ]
+    },
+    "10": {
+      "tiles": 765,
+      "base": 39213867,
+      "bytes": 3150507,
+      "index": [
+        42364374,
+        3649
+      ]
+    },
+    "11": {
+      "tiles": 153,
+      "base": 42368023,
+      "bytes": 684388,
+      "index": [
+        43052411,
+        839
+      ]
+    },
+    "12": {
+      "tiles": 58,
+      "base": 43053250,
+      "bytes": 235091,
+      "index": [
+        43288341,
+        351
+      ]
+    },
+    "13": {
+      "tiles": 17,
+      "base": 43288692,
+      "bytes": 32828,
+      "index": [
+        43321520,
+        143
+      ]
+    }
+  },
+  "countries": [
+    "United States",
+    "Germany",
+    "United Kingdom",
+    "Canada",
+    "Italy",
+    "France",
+    "India",
+    "Spain",
+    "People's Republic of China",
+    "Australia",
+    "Japan",
+    "Mexico",
+    "Austria",
+    "Hungary",
+    "Poland",
+    "Philippines",
+    "Finland",
+    "Indonesia",
+    "Greece",
+    "Netherlands",
+    "South Korea",
+    "Egypt",
+    "Brazil",
+    "Russia",
+    "Switzerland",
+    "Turkey",
+    "Thailand",
+    "Sweden",
+    "Portugal",
+    "Denmark",
+    "Nigeria",
+    "Taiwan",
+    "New Zealand",
+    "Belgium",
+    "Ireland",
+    "Norway",
+    "Malaysia",
+    "Romania",
+    "Iran",
+    "Czech Republic",
+    "Ukraine",
+    "South Africa",
+    "Argentina",
+    "Slovakia",
+    "Croatia",
+    "Israel",
+    "Albania",
+    "Georgia",
+    "Vietnam",
+    "Bulgaria",
+    "North Macedonia",
+    "Morocco",
+    "Kenya",
+    "Estonia",
+    "Colombia",
+    "Chile",
+    "Sri Lanka",
+    "Peru",
+    "Ethiopia",
+    "Kazakhstan",
+    "Armenia",
+    "Myanmar",
+    "Latvia",
+    "Lithuania",
+    "Slovenia",
+    "Pakistan",
+    "Bangladesh",
+    "Iceland",
+    "Costa Rica",
+    "Singapore",
+    "Uruguay",
+    "Uzbekistan",
+    "Cyprus",
+    "Serbia",
+    "Cameroon",
+    "Mongolia",
+    "Bosnia and Herzegovina",
+    "Iraq",
+    "Cambodia",
+    "Luxembourg",
+    "Ecuador",
+    "Azerbaijan",
+    "Tunisia",
+    "Nepal",
+    "Bolivia",
+    "Oman",
+    "Belarus",
+    "United Arab Emirates",
+    "Saudi Arabia",
+    "Ghana",
+    "Cuba",
+    "Venezuela",
+    "Laos",
+    "Namibia",
+    "Guatemala",
+    "Jordan",
+    "Malta",
+    "Paraguay",
+    "Nicaragua",
+    "Montenegro",
+    "Kyrgyzstan",
+    "Algeria",
+    "El Salvador",
+    "Madagascar",
+    "Tanzania",
+    "Belize",
+    "Moldova",
+    "Rwanda",
+    "Afghanistan",
+    "Palestine",
+    "Uganda",
+    "Qatar",
+    "Dominican Republic",
+    "Syria",
+    "Angola",
+    "Democratic Republic of the Congo",
+    "Cape Verde",
+    "Fiji",
+    "Tajikistan",
+    "Zimbabwe",
+    "Honduras",
+    "Lebanon",
+    "Sudan",
+    "Senegal",
+    "The Bahamas",
+    "Mozambique",
+    "Papua New Guinea",
+    "Panama",
+    "Greenland",
+    "Kosovo",
+    "Timor-Leste",
+    "North Korea",
+    "Ivory Coast",
+    "Zambia",
+    "Benin",
+    "Mauritius",
+    "Bhutan",
+    "Mali",
+    "Seychelles",
+    "Isle of Man",
+    "Botswana",
+    "Burkina Faso",
+    "Malawi",
+    "Maldives",
+    "Vanuatu",
+    "Bahrain",
+    "Andorra",
+    "Faroe Islands",
+    "Grenada",
+    "Guyana",
+    "Samoa",
+    "Brunei",
+    "Barbados",
+    "Jamaica",
+    "Togo",
+    "Tonga",
+    "Turkmenistan",
+    "Gabon",
+    "Mauritania",
+    "Sierra Leone",
+    "Guinea",
+    "Suriname",
+    "Monaco",
+    "Eswatini",
+    "Somalia",
+    "Haiti",
+    "Libya",
+    "Yemen",
+    "Trinidad and Tobago",
+    "Solomon Islands",
+    "Comoros",
+    "Niger",
+    "Liechtenstein",
+    "São Tomé and Príncipe",
+    "The Gambia",
+    "Chad",
+    "Equatorial Guinea",
+    "Palau",
+    "Burundi",
+    "Republic of the Congo",
+    "South Sudan",
+    "Guinea-Bissau",
+    "Sint Maarten",
+    "Eritrea",
+    "Republic of China",
+    "Liberia",
+    "Antigua and Barbuda",
+    "Cook Islands",
+    "Djibouti",
+    "Lesotho",
+    "Kiribati",
+    "Guernsey",
+    "Saint Lucia",
+    "Dominica",
+    "Kuwait",
+    "Ottoman Empire",
+    "Vatican City",
+    "Saint Vincent and the Grenadines",
+    "Bermuda",
+    "Marshall Islands",
+    "Curaçao",
+    "Russian Empire",
+    "San Marino",
+    "Aruba",
+    "Federated States of Micronesia",
+    "Falkland Islands",
+    "Austria–Hungary",
+    "Central African Republic",
+    "Saint Kitts and Nevis",
+    "Niue",
+    "Kingdom of Denmark",
+    "Kingdom of the Netherlands",
+    "German Empire",
+    "Nauru",
+    "Northern Cyprus",
+    "Prussia",
+    "Israeli-occupied territories",
+    "Soviet Union",
+    "Somaliland",
+    "realm of the United Kingdom",
+    "Jersey",
+    "United States Virgin Islands",
+    "German Democratic Republic",
+    "Internationality",
+    "British Virgin Islands",
+    "Kingdom of France",
+    "Roman Empire",
+    "Empire of Japan",
+    "Tuvalu",
+    "Turks and Caicos Islands",
+    "Polish–Lithuanian Commonwealth",
+    "Cayman Islands",
+    "Kingdom of Hungary",
+    "British Empire",
+    "Kingdom of Italy",
+    "Spanish Empire",
+    "Western Sahara",
+    "Anguilla",
+    "Asia",
+    "Czechoslovakia",
+    "Duchy of Courland and Semigallia",
+    "Electoral Palatinate",
+    "Esperantujo",
+    "Gaul",
+    "German Reich",
+    "Holy Roman Empire",
+    "Inca Empire",
+    "Israela",
+    "Joseon",
+    "Liberland",
+    "Montserrat",
+    "Principality of Wallachia",
+    "Sahrawi Arab Democratic Republic",
+    "Serbia and Montenegro",
+    "Yugoslavia"
+  ],
+  "categories": [
+    {
+      "id": 0,
+      "name": "Practical",
+      "subcategories": [
+        "Other",
+        "Tourist information",
+        "Health",
+        "Embassy",
+        "Money & post",
+        "Police"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Destination",
+      "subcategories": [
+        "Other",
+        "City",
+        "District",
+        "Region",
+        "Country",
+        "Park",
+        "Rural area",
+        "Airport",
+        "Dive site",
+        "Itinerary & topic"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "See",
+      "subcategories": [
+        "Other",
+        "Museum",
+        "Religious site",
+        "Castle & palace",
+        "Monument & memorial",
+        "Historic building",
+        "Archaeological site",
+        "Park & garden",
+        "Nature & viewpoint",
+        "Square & street",
+        "Zoo & aquarium"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Do",
+      "subcategories": [
+        "Other",
+        "Beach & swimming",
+        "Outdoors & sport",
+        "Theatre & music",
+        "Tours",
+        "Festival & event",
+        "Amusement & leisure",
+        "Course"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Buy",
+      "subcategories": [
+        "Other",
+        "Market",
+        "Mall & department store",
+        "Shop"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Eat",
+      "subcategories": [
+        "Other",
+        "Restaurant",
+        "Café & bakery",
+        "Fast food & snack"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Drink",
+      "subcategories": [
+        "Other",
+        "Bar & pub",
+        "Club",
+        "Winery & brewery"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Sleep",
+      "subcategories": [
+        "Other",
+        "Hotel",
+        "Hostel",
+        "Guesthouse & B&B",
+        "Camping",
+        "Apartment & resort"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Go",
+      "subcategories": [
+        "Other",
+        "Airport",
+        "Station",
+        "Port & ferry",
+        "Rental",
+        "Parking & fuel"
+      ]
+    }
+  ],
+  "palette": {
+    "light": [
+      "#8a8a85",
+      "#0d1bfb",
+      "#d8a614",
+      "#578c19",
+      "#f65b74",
+      "#883c00",
+      "#ac158b",
+      "#6d56c0",
+      "#46c6cf"
+    ],
+    "dark": [
+      "#8f8f88",
+      "#314fe7",
+      "#696106",
+      "#46ac71",
+      "#ab545e",
+      "#c98212",
+      "#e5219f",
+      "#8729aa",
+      "#00809a"
+    ]
+  },
+  "locSources": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "peopleCat": -1,
+  "importanceScale": 5.557364017519825,
+  "viewsFrom": "2022-11",
+  "viewsTo": "2024-10",
+  "extras": [
+    "m1",
+    "m2",
+    "m3",
+    "m4",
+    "m5",
+    "m6",
+    "m7",
+    "m8",
+    "m9",
+    "m10",
+    "m11",
+    "m12",
+    "status"
+  ],
+  "months": [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ],
+  "statuses": [
+    "",
+    "outline",
+    "usable",
+    "guide",
+    "star"
+  ]
+}
